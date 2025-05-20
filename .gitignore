@@ -1,0 +1,30 @@
+# Byte-code files
+*.pyc
+__pycache__/
+
+# Distribution / packaging
+.Python
+build/
+dist/
+eggs/
+*.egg-info/
+.tox/
+
+# Virtual environment
+venv/
+.venv/
+env/
+.env/
+
+# Editors and IDEs
+.vscode/
+.idea/
+
+# OS generated files
+.DS_Store
+.localized
+Thumbs.db
+
+# Logs and databases
+*.log
+*.sqlite3
