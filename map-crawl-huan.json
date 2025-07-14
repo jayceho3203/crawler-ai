@@ -56,7 +56,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "=https://api.apify.com/v2/acts/compass~google-maps-extractor/runs?token=your_token",
+        "url": "={{ $env.APIFY_RUN_URL }}",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={\n    \"language\": \"en\",\n    \"locationQuery\": \"{{ $json.location_query }}\",\n    \"maxCrawledPlacesPerSearch\": 20,\n    \"placeMinimumStars\": \"three\",\n    \"searchStringsArray\": [\n        \"technology company\",\n        \"IT company\",\n        \"software company\",\n        \"tech startup\",\n        \"information technology services\",\n        \"software development\",\n        \"IT solutions\",\n        \"data analytics company\",\n        \"cloud computing services\"\n    ],\n    \"skipClosedPlaces\": true,\n    \"website\": \"withWebsite\",\n    \"deeperCityScrape\": false\n}",
@@ -446,7 +446,7 @@
     },
     {
       "parameters": {
-        "url": "=https://api.apify.com/v2/acts/{{ $json.body.eventData.actorId }}/runs/last/dataset/items?token=your_token&status=SUCCEEDED",
+        "url": "={{ $env.APIFY_RUN_URL }}",
         "options": {}
       },
       "type": "n8n-nodes-base.httpRequest",
