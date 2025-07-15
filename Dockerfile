@@ -30,13 +30,12 @@ COPY requirements.txt .
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Create non-root user for security
-RUN useradd -m -u 1000 appuser
+# Install Playwright browsers and dependencies as root
+RUN playwright install-deps && playwright install chromium
 
-# Install Playwright browsers and dependencies as root (AUTOMATIC)
-RUN playwright install-deps
-RUN playwright install chromium
-RUN playwright install-deps chromium
+# Create non-root user and set permissions for browser cache
+RUN useradd -m -u 1000 appuser
+RUN mkdir -p /home/appuser/.cache && chown -R appuser:appuser /home/appuser/.cache
 
 # Copy application code
 COPY crawl_endpoint.py .
@@ -49,9 +48,8 @@ RUN chown -R appuser:appuser /home/appuser/.cache
 # Switch to appuser
 USER appuser
 
-# Manual Playwright installation as appuser (MANUAL)
+# Install Playwright browser as appuser (manual)
 RUN playwright install chromium
-RUN playwright install-deps chromium
 
 # Expose port
 EXPOSE 8000
