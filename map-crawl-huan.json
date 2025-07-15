@@ -76,7 +76,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "https://crawler-ai-1.onrender.com/crawl_and_extract_contact_info",
+        "url": "https://crawler-ai.fly.dev/crawl_and_extract_contact_info",
         "sendBody": true,
         "bodyParameters": {
           "parameters": [
@@ -654,7 +654,7 @@
     },
     {
       "parameters": {
-        "url": "https://crawler-ai-1.onrender.com/webhook/trigger-crawl-webpage",
+        "url": "https://crawler-ai.fly.dev/webhook/trigger-crawl-webpage",
         "options": {}
       },
       "type": "n8n-nodes-base.httpRequest",

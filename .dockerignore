@@ -1,0 +1,78 @@
+# flyctl launch added from .gitignore
+# Python
+**/__pycache__
+**/*.py[cod]
+**/*$py.class
+**/*.so
+**/.Python
+**/build
+**/develop-eggs
+**/dist
+**/downloads
+**/eggs
+**/.eggs
+**/lib
+**/lib64
+**/parts
+**/sdist
+**/var
+**/wheels
+**/*.egg-info
+**/.installed.cfg
+**/*.egg
+**/MANIFEST
+
+# Virtual environments
+**/venv
+**/.venv
+**/env
+**/ENV
+**/env.bak
+**/venv.bak
+
+# IDE
+**/.vscode
+**/.idea
+**/*.swp
+**/*.swo
+**/*~
+
+# OS
+**/.DS_Store
+**/.DS_Store?
+**/._*
+**/.Spotlight-V100
+**/.Trashes
+**/ehthumbs.db
+**/Thumbs.db
+
+# Logs
+**/*.log
+**/logs
+
+# Environment variables
+**/.env
+**/.env.local
+**/.env.development.local
+**/.env.test.local
+**/.env.production.local
+
+# Temporary files
+**/*.tmp
+**/*.temp
+**/.cache
+
+# Fly.io
+**/.fly
+
+# flyctl launch added from .venv/.gitignore
+.venv/**/*
+
+# flyctl launch added from .venv/lib/python3.10/site-packages/litellm/proxy/.gitignore
+.venv/lib/python3.10/site-packages/litellm/proxy/**/.env
+.venv/lib/python3.10/site-packages/litellm/proxy/**/secrets.toml
+
+# flyctl launch added from venv/lib/python3.10/site-packages/litellm/proxy/.gitignore
+venv/lib/python3.10/site-packages/litellm/proxy/**/.env
+venv/lib/python3.10/site-packages/litellm/proxy/**/secrets.toml
+fly.toml
