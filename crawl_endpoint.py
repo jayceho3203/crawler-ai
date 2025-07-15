@@ -6,6 +6,7 @@ import logging
 from bs4 import BeautifulSoup
 from typing import Optional, List, Dict
 from datetime import datetime
+import os
 
 from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
 from crawl4ai.extraction_strategy import RegexExtractionStrategy
@@ -65,7 +66,21 @@ async def crawl_and_extract_contact_info(request: CrawlRequest):
     }
     run_config = CrawlerRunConfig(**config_params)
 
-    async with AsyncWebCrawler() as crawler:
+    # Configure browser for Docker environment
+    browser_config = {
+        "headless": True,
+        "args": [
+            "--no-sandbox",
+            "--disable-setuid-sandbox",
+            "--disable-dev-shm-usage",
+            "--disable-accelerated-2d-canvas",
+            "--no-first-run",
+            "--no-zygote",
+            "--disable-gpu"
+        ]
+    }
+
+    async with AsyncWebCrawler(browser_config=browser_config) as crawler:
         try:
             logger.info(f"📡 Crawling: {request.url}")
             result = await crawler.arun(url=request.url, config=run_config)
