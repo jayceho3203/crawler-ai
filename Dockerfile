@@ -30,7 +30,10 @@ COPY requirements.txt .
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Install Playwright browsers and dependencies
+# Create non-root user for security
+RUN useradd -m -u 1000 appuser
+
+# Install Playwright browsers and dependencies as root
 RUN playwright install-deps
 RUN playwright install chromium
 RUN playwright install-deps chromium
@@ -39,8 +42,11 @@ RUN playwright install-deps chromium
 COPY crawl_endpoint.py .
 COPY contact_extractor.py .
 
-# Create non-root user for security
-RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
+# Change ownership of Playwright cache to appuser
+RUN chown -R appuser:appuser /app
+RUN chown -R appuser:appuser /home/appuser/.cache
+
+# Switch to appuser
 USER appuser
 
 # Expose port
