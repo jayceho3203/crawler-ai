@@ -60,7 +60,9 @@
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={\n    \"language\": \"en\",\n    \"locationQuery\": \"{{ $json.location_query }}\",\n    \"maxCrawledPlacesPerSearch\": 20,\n    \"placeMinimumStars\": \"three\",\n    \"searchStringsArray\": [\n        \"technology company\",\n        \"IT company\",\n        \"software company\",\n        \"tech startup\",\n        \"information technology services\",\n        \"software development\",\n        \"IT solutions\",\n        \"data analytics company\",\n        \"cloud computing services\"\n    ],\n    \"skipClosedPlaces\": true,\n    \"website\": \"withWebsite\",\n    \"deeperCityScrape\": false\n}",
-        "options": {}
+        "options": {
+          "timeout": 60000
+        }
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -74,7 +76,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "http://host.docker.internal:8000/crawl_and_extract_contact_info",
+        "url": "https://crawler-ai-1.onrender.com/crawl_and_extract_contact_info",
         "sendBody": true,
         "bodyParameters": {
           "parameters": [
@@ -84,7 +86,9 @@
             }
           ]
         },
-        "options": {}
+        "options": {
+          "timeout": 30000
+        }
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -100,7 +104,7 @@
     {
       "parameters": {
         "promptType": "define",
-        "text": "=Data: {{ $json.fit_markdown }} map_company_id: {{ $('Include the map company id').item.json.map_company_id }}\nBased on the data output the format required by output parser, if which data don't have data, input string null to it",
+        "text": "=Data: {{ $json.fit_markdown || 'No data available' }} map_company_id: {{ $('Include the map company id').item.json.map_company_id }}\nBased on the data output the format required by output parser, if which data don't have data, input string 'null' to it",
         "hasOutputParser": true,
         "options": {}
       },
@@ -182,25 +186,25 @@
             {
               "id": "22513cbc-f1f6-4adb-add9-655bc43cba01",
               "name": "p_email",
-              "value": "={{ $json.emails }}",
+              "value": "={{ $json.emails || 'No emails found' }}",
               "type": "string"
             },
             {
               "id": "b8c19ccf-4a5d-4471-bb92-8f90879ded81",
               "name": "p_social",
-              "value": "={{ $json.social_links }}",
+              "value": "={{ $json.social_links || 'No social links found' }}",
               "type": "string"
             },
             {
               "id": "e8c463b1-3e12-4a1e-acf7-6338c8013bc1",
               "name": "p_career_pages",
-              "value": "={{ $json.career_pages }}",
+              "value": "={{ $json.career_pages || 'No career pages found' }}",
               "type": "string"
             },
             {
               "id": "9d3281f7-e688-4b4a-b9f3-4f362f30ed07",
               "name": "p_crawl_data",
-              "value": "={{ $json.fit_markdown }}",
+              "value": "={{ $json.fit_markdown || 'No data available' }}",
               "type": "string"
             }
           ]
@@ -259,7 +263,9 @@
             {}
           ]
         },
-        "options": {}
+        "options": {
+          "timeout": 30000
+        }
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -301,6 +307,7 @@
           ]
         },
         "options": {
+          "timeout": 30000,
           "response": {
             "response": {
               "responseFormat": "text"
@@ -398,6 +405,7 @@
           ]
         },
         "options": {
+          "timeout": 30000,
           "response": {
             "response": {
               "responseFormat": "text"
@@ -646,7 +654,7 @@
     },
     {
       "parameters": {
-        "url": "https://2920-42-113-66-224.ngrok-free.app/webhook/trigger-crawl-webpage",
+        "url": "https://crawler-ai-1.onrender.com/webhook/trigger-crawl-webpage",
         "options": {}
       },
       "type": "n8n-nodes-base.httpRequest",
@@ -816,6 +824,47 @@
       ],
       "id": "a2fedb61-e538-41b4-a45d-aa8fc70d985a",
       "name": "Extract from File1"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "1",
+              "leftValue": "={{ $json.website }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            },
+            {
+              "id": "2",
+              "leftValue": "={{ $json.website }}",
+              "rightValue": "null",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -3000,
+        940
+      ],
+      "id": "website-validation",
+      "name": "Validate Website"
     }
   ],
   "connections": {
@@ -945,6 +994,17 @@
       ]
     },
     "Include the map company id": {
+      "main": [
+        [
+          {
+            "node": "Validate Website",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Website": {
       "main": [
         [
           {
