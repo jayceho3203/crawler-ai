@@ -18,6 +18,7 @@ RUN apt-get update && apt-get install -y \
     libxdamage1 \
     libxrandr2 \
     xdg-utils \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
@@ -29,9 +30,10 @@ COPY requirements.txt .
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Install Playwright browsers
+# Install Playwright browsers and dependencies
 RUN playwright install-deps
 RUN playwright install chromium
+RUN playwright install-deps chromium
 
 # Copy application code
 COPY crawl_endpoint.py .
