@@ -7,6 +7,8 @@ from bs4 import BeautifulSoup
 from typing import Optional, List, Dict
 from datetime import datetime
 import os
+import requests
+from urllib.parse import urljoin
 
 from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
 from crawl4ai.extraction_strategy import RegexExtractionStrategy
@@ -46,6 +48,47 @@ class CrawlResponse(BaseModel):
     fit_markdown: Optional[str] = None
 
 
+def extract_with_requests(url: str) -> Dict:
+    """Fallback method using requests when Playwright fails"""
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        response = requests.get(url, headers=headers, timeout=30)
+        response.raise_for_status()
+        
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        # Extract emails using regex
+        import re
+        email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
+        emails = re.findall(email_pattern, response.text)
+        
+        # Extract URLs
+        urls = []
+        for a_tag in soup.find_all('a', href=True):
+            href = a_tag.get('href')
+            if href:
+                full_url = urljoin(url, href)
+                urls.append(full_url)
+        
+        return {
+            "success": True,
+            "status_code": response.status_code,
+            "url": response.url,
+            "html": response.text,
+            "emails": emails,
+            "urls": urls
+        }
+    except Exception as e:
+        logger.error(f"❌ Requests fallback failed for {url}: {str(e)}")
+        return {
+            "success": False,
+            "error_message": str(e),
+            "status_code": 500
+        }
+
+
 @app.post("/crawl_and_extract_contact_info", response_model=CrawlResponse)
 async def crawl_and_extract_contact_info(request: CrawlRequest):
     start_time = datetime.now()
@@ -80,9 +123,10 @@ async def crawl_and_extract_contact_info(request: CrawlRequest):
         ]
     }
 
-    async with AsyncWebCrawler(browser_config=browser_config) as crawler:
-        try:
-            logger.info(f"📡 Crawling: {request.url}")
+    # Try Playwright first, fallback to requests if it fails
+    try:
+        async with AsyncWebCrawler(browser_config=browser_config) as crawler:
+            logger.info(f"📡 Crawling with Playwright: {request.url}")
             result = await crawler.arun(url=request.url, config=run_config)
 
             response_data.final_url = result.url
@@ -92,40 +136,31 @@ async def crawl_and_extract_contact_info(request: CrawlRequest):
 
             if result.markdown and isinstance(result.markdown, MarkdownGenerationResult):
                  response_data.fit_markdown = result.markdown.fit_markdown
-            elif isinstance(result.markdown, str): # Fallback if markdown is just a string
+            elif isinstance(result.markdown, str):
                  response_data.fit_markdown = result.markdown
 
-            logger.info(f"✅ Crawl completed: {request.url} - Status: {result.status_code}")
+            logger.info(f"✅ Playwright crawl completed: {request.url} - Status: {result.status_code}")
 
             data_for_extractor = []
-            processed_html_for_urls = False # Flag to track if BS was used
+            processed_html_for_urls = False
 
-            # Extract Emails (from crawl_result.raw_extracted_data if it exists and has emails)
-            # Assuming result.extracted_content is the JSON string from RegexExtractionStrategy
+            # Extract Emails
             if result.extracted_content:
                 try:
-                    # Parse the JSON string from extracted_content
-                    # This part assumes extracted_content is where regex results are stored as a JSON string
-                    # And that this JSON string, when parsed, becomes a list of dicts like:
-                    # [{"label": "email", "value": "test@example.com"}, {"label": "url", "value": "http..."}]
                     parsed_extracted_content = json.loads(result.extracted_content)
-                    response_data.raw_extracted_data = parsed_extracted_content # Store for debugging/transparency
+                    response_data.raw_extracted_data = parsed_extracted_content
 
                     if isinstance(parsed_extracted_content, list):
                         for item in parsed_extracted_content:
                             if isinstance(item, dict) and item.get("label") == "email" and item.get("value"):
                                 data_for_extractor.append({"label": "email", "value": str(item["value"])})
                 except json.JSONDecodeError:
-                    # Log or handle error if extracted_content is not valid JSON
                     logger.error(f"❌ Error decoding JSON from extracted_content: {result.extracted_content}")
-                    # Optionally, set an error message in response_data
-                    # response_data.error_message = "Failed to parse raw extracted data."
 
-
-            # Extract URLs (using BeautifulSoup from crawl_result.html)
-            if result.html: # <<< CORRECTED: Ensure this is .html
+            # Extract URLs
+            if result.html:
                 try:
-                    soup = BeautifulSoup(result.html, "html.parser") # <<< CORRECTED: Ensure this is .html
+                    soup = BeautifulSoup(result.html, "html.parser")
                     for a_tag in soup.find_all('a', href=True):
                         href = a_tag.get('href')
                         if href and str(href).strip():
@@ -133,45 +168,63 @@ async def crawl_and_extract_contact_info(request: CrawlRequest):
                     processed_html_for_urls = True
                 except Exception as e:
                     logger.error(f"❌ Error during BeautifulSoup parsing: {e}")
-                    # Potentially log this error, but allow fallback
 
-            # Fallback for URLs if HTML wasn't processed by BeautifulSoup
-            # (e.g. crawl_result.html was None or BS failed)
-            # and raw_extracted_data from crawler has URL data (assuming this means parsed_extracted_content)
+            # Fallback for URLs
             if not processed_html_for_urls and response_data.raw_extracted_data and isinstance(response_data.raw_extracted_data, list):
-                for item in response_data.raw_extracted_data: # Use response_data.raw_extracted_data which holds the parsed content
+                for item in response_data.raw_extracted_data:
                     if isinstance(item, dict) and item.get("label") == "url" and item.get("value"):
                         is_duplicate = False
-                        # Check against already added items (which could be from regex emails or BS URLs)
                         for existing_item in data_for_extractor:
                             if existing_item.get("label") == "url" and existing_item.get("value") == item.get("value"):
                                 is_duplicate = True
                                 break
                         if not is_duplicate:
                              data_for_extractor.append({"label": "url", "value": str(item["value"])})
-    
-            # Call process_extracted_crawl_results
-            classified_contacts = process_extracted_crawl_results(
-                raw_extracted_list=data_for_extractor,
-                base_url=str(result.url) if result.url else request.url # Use result.url (final URL) if available
-            )
-            response_data.emails = classified_contacts.get("emails", [])
-            response_data.social_links = classified_contacts.get("social_links", [])
-            response_data.career_pages = classified_contacts.get("career_pages", [])
 
-            # Log extraction results
-            logger.info(f"📊 Extraction results for {request.url}:")
-            logger.info(f"   📧 Emails: {len(response_data.emails)}")
-            logger.info(f"   🔗 Social links: {len(response_data.social_links)}")
-            logger.info(f"   💼 Career pages: {len(response_data.career_pages)}")
+    except Exception as e:
+        logger.warning(f"⚠️ Playwright failed, trying requests fallback: {str(e)}")
+        
+        # Fallback to requests
+        fallback_result = extract_with_requests(request.url)
+        
+        response_data.final_url = fallback_result.get("url", request.url)
+        response_data.success = fallback_result.get("success", False)
+        response_data.error_message = fallback_result.get("error_message")
+        response_data.status_code = fallback_result.get("status_code", 500)
+        
+        if fallback_result.get("success"):
+            logger.info(f"✅ Requests fallback successful: {request.url}")
+            
+            data_for_extractor = []
+            
+            # Add emails from fallback
+            for email in fallback_result.get("emails", []):
+                data_for_extractor.append({"label": "email", "value": email})
+            
+            # Add URLs from fallback
+            for url in fallback_result.get("urls", []):
+                data_for_extractor.append({"label": "url", "value": url})
+            
+            response_data.raw_extracted_data = data_for_extractor
+        else:
+            response_data.error_message = f"Both Playwright and requests failed: {str(e)}"
+            logger.error(f"❌ Both methods failed for {request.url}")
 
-        except Exception as e:
-            response_data.success = False
-            response_data.error_message = f"An unexpected error occurred during crawling: {str(e)}"
-            logger.error(f"❌ Crawl failed for {request.url}: {str(e)}")
-            # Ensure status_code is not None if an early exception occurs before result object is formed
-            if response_data.status_code is None:
-                 response_data.status_code = 500 # Generic server error
+    # Process extracted data
+    if data_for_extractor:
+        classified_contacts = process_extracted_crawl_results(
+            raw_extracted_list=data_for_extractor,
+            base_url=str(response_data.final_url) if response_data.final_url else request.url
+        )
+        response_data.emails = classified_contacts.get("emails", [])
+        response_data.social_links = classified_contacts.get("social_links", [])
+        response_data.career_pages = classified_contacts.get("career_pages", [])
+
+        # Log extraction results
+        logger.info(f"📊 Extraction results for {request.url}:")
+        logger.info(f"   📧 Emails: {len(response_data.emails)}")
+        logger.info(f"   🔗 Social links: {len(response_data.social_links)}")
+        logger.info(f"   💼 Career pages: {len(response_data.career_pages)}")
 
     end_time = datetime.now()
     duration = (end_time - start_time).total_seconds()
