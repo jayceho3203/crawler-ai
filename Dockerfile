@@ -33,7 +33,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Create non-root user for security
 RUN useradd -m -u 1000 appuser
 
-# Install Playwright browsers and dependencies as root
+# Install Playwright browsers and dependencies as root (AUTOMATIC)
 RUN playwright install-deps
 RUN playwright install chromium
 RUN playwright install-deps chromium
@@ -48,6 +48,10 @@ RUN chown -R appuser:appuser /home/appuser/.cache
 
 # Switch to appuser
 USER appuser
+
+# Manual Playwright installation as appuser (MANUAL)
+RUN playwright install chromium
+RUN playwright install-deps chromium
 
 # Expose port
 EXPOSE 8000
