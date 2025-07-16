@@ -40,6 +40,7 @@ class BatchCrawlRequest(BaseModel):
     social: Optional[List[str]] = []
     career_page: Optional[List[str]] = []
     crawl_data: Optional[str] = None
+    url: Optional[str] = None  # Thêm field url để tương thích với endpoint cũ
 
 class CrawlResponse(BaseModel):
     requested_url: str
@@ -168,6 +169,17 @@ async def batch_crawl_and_extract(request: BatchCrawlRequest):
     This endpoint is designed to work with n8n workflow data.
     """
     start_time = datetime.now()
+    
+    # Debug logging
+    logger.info(f"🔍 Received request data:")
+    logger.info(f"   name: {request.name}")
+    logger.info(f"   domain: {request.domain}")
+    logger.info(f"   phone: {request.phone}")
+    logger.info(f"   description: {request.description}")
+    logger.info(f"   social: {request.social}")
+    logger.info(f"   career_page: {request.career_page}")
+    logger.info(f"   crawl_data: {request.crawl_data}")
+    
     logger.info(f"🚀 Starting batch crawl for company: {request.name}")
     
     response = BatchCrawlResponse(
@@ -180,30 +192,38 @@ async def batch_crawl_and_extract(request: BatchCrawlRequest):
     # Collect all URLs to crawl
     urls_to_crawl = []
     
-    # Add social links
-    if request.social:
-        if isinstance(request.social, str):
-            # Handle case where social is passed as string
-            social_urls = [url.strip() for url in request.social.split(',') if url.strip()]
-        else:
-            social_urls = request.social
-        urls_to_crawl.extend(social_urls)
-        response.social_links = social_urls
-    
-    # Add career pages
-    if request.career_page:
-        if isinstance(request.career_page, str):
-            # Handle case where career_page is passed as string
-            career_urls = [url.strip() for url in request.career_page.split(',') if url.strip()]
-        else:
-            career_urls = request.career_page
-        urls_to_crawl.extend(career_urls)
-        response.career_pages = career_urls
-    
-    # Add main domain if available
-    if request.domain and not request.domain.startswith(('http://', 'https://')):
-        main_url = f"https://{request.domain}"
-        urls_to_crawl.insert(0, main_url)  # Add main domain first
+    # Handle case where only url is provided (backward compatibility)
+    if request.url and not request.domain:
+        logger.info(f"🔗 Using single URL mode: {request.url}")
+        urls_to_crawl.append(request.url)
+        response.domain = request.url
+    else:
+        # Add social links
+        if request.social:
+            if isinstance(request.social, str):
+                # Handle case where social is passed as string
+                social_urls = [url.strip() for url in request.social.split(',') if url.strip()]
+            else:
+                social_urls = request.social
+            urls_to_crawl.extend(social_urls)
+            response.social_links = social_urls
+        
+        # Add career pages
+        if request.career_page:
+            if isinstance(request.career_page, str):
+                # Handle case where career_page is passed as string
+                career_urls = [url.strip() for url in request.career_page.split(',') if url.strip()]
+            else:
+                career_urls = request.career_page
+            urls_to_crawl.extend(career_urls)
+            response.career_pages = career_urls
+        
+        # Add main domain if available
+        if request.domain and not request.domain.startswith(('http://', 'https://')):
+            main_url = f"https://{request.domain}"
+            urls_to_crawl.insert(0, main_url)  # Add main domain first
+        elif request.domain:
+            urls_to_crawl.insert(0, request.domain)  # Add main domain first
     
     response.total_urls_processed = len(urls_to_crawl)
     logger.info(f"📋 URLs to crawl: {response.total_urls_processed}")
