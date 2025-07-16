@@ -31,6 +31,16 @@ app = FastAPI()
 class CrawlRequest(BaseModel):
     url: str
 
+class BatchCrawlRequest(BaseModel):
+    name: Optional[str] = None
+    domain: Optional[str] = None
+    phone: Optional[str] = None
+    description: Optional[str] = None
+    data_raw: Optional[str] = None
+    social: Optional[List[str]] = []
+    career_page: Optional[List[str]] = []
+    crawl_data: Optional[str] = None
+
 class CrawlResponse(BaseModel):
     requested_url: str
     final_url: Optional[str] = None
@@ -42,6 +52,18 @@ class CrawlResponse(BaseModel):
     career_pages: List[str] = []
     raw_extracted_data: Optional[Dict] = None
     fit_markdown: Optional[str] = None
+
+class BatchCrawlResponse(BaseModel):
+    company_name: Optional[str] = None
+    domain: Optional[str] = None
+    phone: Optional[str] = None
+    description: Optional[str] = None
+    social_links: List[str] = []
+    career_pages: List[str] = []
+    emails: List[str] = []
+    crawl_results: List[Dict] = []
+    total_urls_processed: int = 0
+    successful_crawls: int = 0
 
 
 def extract_with_requests(url: str) -> Dict:
@@ -139,6 +161,126 @@ async def crawl_and_extract_contact_info(request: CrawlRequest):
     
     return response_data
 
+@app.post("/batch_crawl_and_extract", response_model=BatchCrawlResponse)
+async def batch_crawl_and_extract(request: BatchCrawlRequest):
+    """
+    Batch crawl multiple URLs (social links, career pages) and extract contact information.
+    This endpoint is designed to work with n8n workflow data.
+    """
+    start_time = datetime.now()
+    logger.info(f"🚀 Starting batch crawl for company: {request.name}")
+    
+    response = BatchCrawlResponse(
+        company_name=request.name,
+        domain=request.domain,
+        phone=request.phone,
+        description=request.description
+    )
+    
+    # Collect all URLs to crawl
+    urls_to_crawl = []
+    
+    # Add social links
+    if request.social:
+        if isinstance(request.social, str):
+            # Handle case where social is passed as string
+            social_urls = [url.strip() for url in request.social.split(',') if url.strip()]
+        else:
+            social_urls = request.social
+        urls_to_crawl.extend(social_urls)
+        response.social_links = social_urls
+    
+    # Add career pages
+    if request.career_page:
+        if isinstance(request.career_page, str):
+            # Handle case where career_page is passed as string
+            career_urls = [url.strip() for url in request.career_page.split(',') if url.strip()]
+        else:
+            career_urls = request.career_page
+        urls_to_crawl.extend(career_urls)
+        response.career_pages = career_urls
+    
+    # Add main domain if available
+    if request.domain and not request.domain.startswith(('http://', 'https://')):
+        main_url = f"https://{request.domain}"
+        urls_to_crawl.insert(0, main_url)  # Add main domain first
+    
+    response.total_urls_processed = len(urls_to_crawl)
+    logger.info(f"📋 URLs to crawl: {response.total_urls_processed}")
+    
+    # Crawl each URL
+    all_emails = set()
+    all_social_links = set()
+    all_career_pages = set()
+    
+    for url in urls_to_crawl:
+        try:
+            logger.info(f"📡 Crawling: {url}")
+            result = extract_with_requests(url)
+            
+            crawl_result = {
+                "url": url,
+                "success": result.get("success", False),
+                "status_code": result.get("status_code"),
+                "error_message": result.get("error_message"),
+                "emails": [],
+                "social_links": [],
+                "career_pages": []
+            }
+            
+            if result.get("success"):
+                response.successful_crawls += 1
+                
+                # Process extracted data
+                data_for_extractor = []
+                
+                # Add emails
+                for email in result.get("emails", []):
+                    data_for_extractor.append({"label": "email", "value": email})
+                    all_emails.add(email)
+                
+                # Add URLs
+                for url_found in result.get("urls", []):
+                    data_for_extractor.append({"label": "url", "value": url_found})
+                
+                # Process with contact extractor
+                if data_for_extractor:
+                    classified_contacts = process_extracted_crawl_results(
+                        raw_extracted_list=data_for_extractor,
+                        base_url=result.get("url", url)
+                    )
+                    
+                    crawl_result["emails"] = classified_contacts.get("emails", [])
+                    crawl_result["social_links"] = classified_contacts.get("social_links", [])
+                    crawl_result["career_pages"] = classified_contacts.get("career_pages", [])
+                    
+                    # Add to global sets
+                    all_emails.update(classified_contacts.get("emails", []))
+                    all_social_links.update(classified_contacts.get("social_links", []))
+                    all_career_pages.update(classified_contacts.get("career_pages", []))
+            
+            response.crawl_results.append(crawl_result)
+            
+        except Exception as e:
+            logger.error(f"❌ Error crawling {url}: {str(e)}")
+            response.crawl_results.append({
+                "url": url,
+                "success": False,
+                "error_message": str(e)
+            })
+    
+    # Set final results
+    response.emails = sorted(list(all_emails))
+    response.social_links = sorted(list(all_social_links))
+    response.career_pages = sorted(list(all_career_pages))
+    
+    end_time = datetime.now()
+    duration = (end_time - start_time).total_seconds()
+    logger.info(f"⏱️ Batch crawl completed in {duration:.2f}s")
+    logger.info(f"📊 Results: {len(response.emails)} emails, {len(response.social_links)} social, {len(response.career_pages)} career")
+    
+    return response
+
 @app.get("/stats")
 async def get_crawl_stats():
     """Get crawling statistics"""
@@ -146,7 +288,8 @@ async def get_crawl_stats():
         "message": "Crawl API is running",
         "timestamp": datetime.now().isoformat(),
         "endpoints": {
-            "crawl": "/crawl_and_extract_contact_info",
+            "single_crawl": "/crawl_and_extract_contact_info",
+            "batch_crawl": "/batch_crawl_and_extract",
             "stats": "/stats"
         }
     }
