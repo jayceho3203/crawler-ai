@@ -11,11 +11,6 @@ import requests
 from urllib.parse import urljoin
 import re
 
-from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
-from crawl4ai.extraction_strategy import RegexExtractionStrategy
-from crawl4ai.markdown_generation_strategy import DefaultMarkdownGenerator
-from crawl4ai import MarkdownGenerationResult
-
 # Import from the refactored contact_extractor
 from contact_extractor import (
     process_extracted_crawl_results,

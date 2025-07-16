@@ -1,23 +1,11 @@
 FROM python:3.10-slim
 
-# Install system dependencies for Playwright
+# Install system dependencies for requests and BeautifulSoup
 RUN apt-get update && apt-get install -y \
     wget \
     gnupg \
     ca-certificates \
     procps \
-    libxss1 \
-    fonts-liberation \
-    libasound2 \
-    libatk-bridge2.0-0 \
-    libdrm2 \
-    libgtk-3-0 \
-    libnspr4 \
-    libnss3 \
-    libxcomposite1 \
-    libxdamage1 \
-    libxrandr2 \
-    xdg-utils \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
@@ -30,26 +18,24 @@ COPY requirements.txt .
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Install Playwright browsers and dependencies as root
-RUN playwright install-deps && playwright install chromium
+# Install Playwright browsers and dependencies
+RUN playwright install --with-deps
 
-# Create non-root user and set permissions for browser cache
+# Create non-root user for security
 RUN useradd -m -u 1000 appuser
-RUN mkdir -p /home/appuser/.cache && chown -R appuser:appuser /home/appuser/.cache
 
 # Copy application code
 COPY crawl_endpoint.py .
 COPY contact_extractor.py .
 
-# Change ownership of Playwright cache to appuser
+# Change ownership to appuser
 RUN chown -R appuser:appuser /app
-RUN chown -R appuser:appuser /home/appuser/.cache
 
 # Switch to appuser
 USER appuser
 
-# Install Playwright browser as appuser (manual)
-RUN playwright install chromium
+# Install Playwright browser as appuser
+RUN playwright install --with-deps
 
 # Expose port
 EXPOSE 8000
