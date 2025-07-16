@@ -18,7 +18,7 @@ COPY requirements.txt .
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Install Playwright browsers and dependencies
+# Install Playwright browsers and dependencies as root
 RUN playwright install --with-deps
 
 # Create non-root user for security
@@ -34,8 +34,8 @@ RUN chown -R appuser:appuser /app
 # Switch to appuser
 USER appuser
 
-# Install Playwright browser as appuser
-RUN playwright install --with-deps
+# Install Playwright browser as appuser (without deps since they're already installed)
+RUN playwright install
 
 # Expose port
 EXPOSE 8000
