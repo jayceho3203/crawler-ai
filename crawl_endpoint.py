@@ -4,12 +4,17 @@ from pydantic import BaseModel
 import json
 import logging
 from bs4 import BeautifulSoup
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Set
 from datetime import datetime
 import os
 import requests
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 import re
+import asyncio
+import time
+import hashlib
+from playwright.async_api import async_playwright, Browser, Page
+import random
 
 # Import from the refactored contact_extractor
 from contact_extractor import (
@@ -19,14 +24,44 @@ from contact_extractor import (
     normalize_url
 )
 
-# Keep urllib.parse if used for any direct URL manipulation in the endpoint itself
-from urllib.parse import urlparse, urljoin
-
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
+
+# Vietnamese software company career keywords
+CAREER_KEYWORDS_VI = [
+    'tuyen-dung', 'tuyển-dụng', 'tuyen-dung', 'tuyển-dụng',
+    'viec-lam', 'việc-làm', 'viec-lam', 'việc-làm',
+    'co-hoi', 'cơ-hội', 'co-hoi', 'cơ-hội',
+    'nhan-vien', 'nhân-viên', 'nhan-vien', 'nhân-viên',
+    'developer', 'dev', 'programmer', 'engineer',
+    'software', 'tech', 'technology', 'it',
+    'career', 'job', 'recruitment', 'employment',
+    'work', 'position', 'opportunity', 'vacancy',
+    'tuyen', 'tuyển', 'tuyen', 'tuyển',
+    'apply', 'application', 'hiring', 'join-us',
+    'team', 'talent', 'careers', 'jobs'
+]
+
+# Software company career selectors
+EDUCATION_SELECTORS = [
+    'a[href*="tuyen-dung"]', 'a[href*="viec-lam"]',
+    'a[href*="career"]', 'a[href*="job"]',
+    'a[href*="recruitment"]', 'a[href*="employment"]',
+    'a[href*="developer"]', 'a[href*="dev"]',
+    'a[href*="software"]', 'a[href*="tech"]',
+    'a[href*="hiring"]', 'a[href*="join-us"]',
+    'a[href*="talent"]', 'a[href*="team"]',
+    '.menu a', '.nav a', 'header a', 'footer a',
+    'nav a', '.navigation a', '.navbar a',
+    '.careers a', '.jobs a', '.team a'
+]
+
+# Cache for crawl results
+crawl_cache = {}
+CACHE_DURATION = 3600  # 1 hour
 
 class CrawlRequest(BaseModel):
     url: str
@@ -40,7 +75,7 @@ class BatchCrawlRequest(BaseModel):
     social: Optional[List[str]] = []
     career_page: Optional[List[str]] = []
     crawl_data: Optional[str] = None
-    url: Optional[str] = None  # Thêm field url để tương thích với endpoint cũ
+    url: Optional[str] = None
 
 class CrawlResponse(BaseModel):
     requested_url: str
@@ -53,6 +88,8 @@ class CrawlResponse(BaseModel):
     career_pages: List[str] = []
     raw_extracted_data: Optional[Dict] = None
     fit_markdown: Optional[str] = None
+    crawl_method: Optional[str] = None
+    crawl_time: Optional[float] = None
 
 class BatchCrawlResponse(BaseModel):
     company_name: Optional[str] = None
@@ -65,13 +102,182 @@ class BatchCrawlResponse(BaseModel):
     crawl_results: List[Dict] = []
     total_urls_processed: int = 0
     successful_crawls: int = 0
+    total_crawl_time: Optional[float] = None
 
+def get_cached_result(url: str) -> Optional[Dict]:
+    """Get cached crawl result if available and not expired"""
+    url_hash = hashlib.md5(url.encode()).hexdigest()
+    if url_hash in crawl_cache:
+        cached = crawl_cache[url_hash]
+        if time.time() - cached['timestamp'] < CACHE_DURATION:
+            logger.info(f"📋 Using cached result for {url}")
+            return cached['data']
+    return None
+
+def cache_result(url: str, data: Dict):
+    """Cache crawl result"""
+    url_hash = hashlib.md5(url.encode()).hexdigest()
+    crawl_cache[url_hash] = {
+        'data': data,
+        'timestamp': time.time()
+    }
+
+async def extract_with_playwright(url: str) -> Dict:
+    """Primary method using Playwright for JavaScript rendering and dynamic content"""
+    start_time = time.time()
+    
+    try:
+        async with async_playwright() as p:
+            # Launch browser with stealth mode
+            browser = await p.chromium.launch(
+                headless=True,
+                args=[
+                    '--no-sandbox',
+                    '--disable-setuid-sandbox',
+                    '--disable-dev-shm-usage',
+                    '--disable-accelerated-2d-canvas',
+                    '--no-first-run',
+                    '--no-zygote',
+                    '--disable-gpu'
+                ]
+            )
+            
+            # Create context with stealth settings
+            context = await browser.new_context(
+                viewport={'width': 1920, 'height': 1080},
+                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                extra_http_headers={
+                    'Accept-Language': 'vi-VN,vi;q=0.9,en;q=0.8',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
+                }
+            )
+            
+            page = await context.new_page()
+            
+            # Block unnecessary resources for faster loading
+            await page.route("**/*.{png,jpg,jpeg,gif,svg,woff,woff2,ttf}", lambda route: route.abort())
+            
+            # Navigate to URL
+            logger.info(f"🌐 Playwright navigating to: {url}")
+            response = await page.goto(url, wait_until='domcontentloaded', timeout=15000)
+            
+            if not response or response.status >= 400:
+                raise Exception(f"HTTP {response.status if response else 'Unknown'}")
+            
+            # Wait for page to be ready
+            await page.wait_for_timeout(2000)
+            
+            # Try to find and interact with navigation elements
+            try:
+                # Look for navigation elements
+                nav_selectors = ['nav', '.menu', '.navigation', '.navbar', 'header']
+                for selector in nav_selectors:
+                    try:
+                        await page.wait_for_selector(selector, timeout=3000)
+                        # Hover over navigation to trigger dropdowns
+                        await page.hover(selector)
+                        await page.wait_for_timeout(1000)
+                        break
+                    except:
+                        continue
+            except:
+                pass
+            
+            # Scroll to trigger lazy loading
+            try:
+                await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                await page.wait_for_timeout(1000)
+                await page.evaluate("window.scrollTo(0, 0)")
+                await page.wait_for_timeout(500)
+            except:
+                pass
+            
+            # Extract HTML content
+            html_content = await page.content()
+            
+            # Extract emails using regex
+            email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
+            emails = re.findall(email_pattern, html_content)
+            
+            # Extract all URLs
+            urls = []
+            try:
+                links = await page.query_selector_all('a[href]')
+                for link in links:
+                    href = await link.get_attribute('href')
+                    if href:
+                        full_url = urljoin(url, href)
+                        urls.append(full_url)
+            except:
+                # Fallback to BeautifulSoup if Playwright selector fails
+                soup = BeautifulSoup(html_content, 'html.parser')
+                for a_tag in soup.find_all('a', href=True):
+                    href = a_tag.get('href')
+                    if href:
+                        full_url = urljoin(url, href)
+                        urls.append(full_url)
+            
+            # Look specifically for career-related links
+            career_urls = []
+            try:
+                for selector in EDUCATION_SELECTORS:
+                    try:
+                        elements = await page.query_selector_all(selector)
+                        for element in elements:
+                            href = await element.get_attribute('href')
+                            if href:
+                                full_url = urljoin(url, href)
+                                career_urls.append(full_url)
+                    except:
+                        continue
+            except:
+                pass
+            
+            # Also check URLs for career keywords
+            for url_found in urls:
+                url_lower = url_found.lower()
+                for keyword in CAREER_KEYWORDS_VI:
+                    if keyword in url_lower:
+                        career_urls.append(url_found)
+                        break
+            
+            await browser.close()
+            
+            crawl_time = time.time() - start_time
+            logger.info(f"✅ Playwright crawl completed: {url} - {crawl_time:.2f}s")
+            
+            return {
+                "success": True,
+                "status_code": response.status if response else 200,
+                "url": response.url if response else url,
+                "html": html_content,
+                "emails": list(set(emails)),
+                "urls": list(set(urls)),
+                "career_urls": list(set(career_urls)),
+                "crawl_time": crawl_time,
+                "method": "playwright"
+            }
+            
+    except Exception as e:
+        crawl_time = time.time() - start_time
+        logger.error(f"❌ Playwright failed for {url}: {str(e)}")
+        return {
+            "success": False,
+            "error_message": str(e),
+            "status_code": 500,
+            "crawl_time": crawl_time,
+            "method": "playwright"
+        }
 
 def extract_with_requests(url: str) -> Dict:
-    """Primary method using requests instead of Playwright"""
+    """Fallback method using requests"""
+    start_time = time.time()
+    
     try:
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept-Language': 'vi-VN,vi;q=0.9,en;q=0.8',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
         }
         response = requests.get(url, headers=headers, timeout=30)
         response.raise_for_status()
@@ -90,22 +296,60 @@ def extract_with_requests(url: str) -> Dict:
                 full_url = urljoin(url, href)
                 urls.append(full_url)
         
+        # Look for career-related URLs
+        career_urls = []
+        for url_found in urls:
+            url_lower = url_found.lower()
+            for keyword in CAREER_KEYWORDS_VI:
+                if keyword in url_lower:
+                    career_urls.append(url_found)
+                    break
+        
+        crawl_time = time.time() - start_time
+        logger.info(f"✅ Requests fallback completed: {url} - {crawl_time:.2f}s")
+        
         return {
             "success": True,
             "status_code": response.status_code,
             "url": response.url,
             "html": response.text,
-            "emails": emails,
-            "urls": urls
+            "emails": list(set(emails)),
+            "urls": list(set(urls)),
+            "career_urls": list(set(career_urls)),
+            "crawl_time": crawl_time,
+            "method": "requests"
         }
     except Exception as e:
+        crawl_time = time.time() - start_time
         logger.error(f"❌ Requests failed for {url}: {str(e)}")
         return {
             "success": False,
             "error_message": str(e),
-            "status_code": 500
+            "status_code": 500,
+            "crawl_time": crawl_time,
+            "method": "requests"
         }
 
+async def crawl_single_url(url: str) -> Dict:
+    """Crawl single URL with Playwright primary, requests fallback"""
+    # Check cache first
+    cached = get_cached_result(url)
+    if cached:
+        return cached
+    
+    # Try Playwright first
+    logger.info(f"🚀 Starting Playwright crawl for: {url}")
+    result = await extract_with_playwright(url)
+    
+    # If Playwright fails, try requests
+    if not result.get("success"):
+        logger.info(f"🔄 Playwright failed, trying requests fallback for: {url}")
+        result = extract_with_requests(url)
+    
+    # Cache the result
+    cache_result(url, result)
+    
+    return result
 
 @app.post("/crawl_and_extract_contact_info", response_model=CrawlResponse)
 async def crawl_and_extract_contact_info(request: CrawlRequest):
@@ -114,17 +358,18 @@ async def crawl_and_extract_contact_info(request: CrawlRequest):
     
     response_data = CrawlResponse(requested_url=request.url, success=False)
 
-    # Use requests as primary method (no Playwright)
-    logger.info(f"📡 Crawling with requests: {request.url}")
-    result = extract_with_requests(request.url)
+    # Crawl with improved method
+    result = await crawl_single_url(request.url)
     
     response_data.final_url = result.get("url", request.url)
     response_data.success = result.get("success", False)
     response_data.error_message = result.get("error_message")
     response_data.status_code = result.get("status_code", 500)
+    response_data.crawl_method = result.get("method", "unknown")
+    response_data.crawl_time = result.get("crawl_time", 0)
 
     if result.get("success"):
-        logger.info(f"✅ Requests crawl completed: {request.url} - Status: {result.get('status_code')}")
+        logger.info(f"✅ Crawl completed: {request.url} - Method: {result.get('method')} - Time: {result.get('crawl_time', 0):.2f}s")
         
         data_for_extractor = []
         
@@ -147,6 +392,12 @@ async def crawl_and_extract_contact_info(request: CrawlRequest):
             response_data.emails = classified_contacts.get("emails", [])
             response_data.social_links = classified_contacts.get("social_links", [])
             response_data.career_pages = classified_contacts.get("career_pages", [])
+            
+            # Add career URLs found by our improved method
+            career_urls = result.get("career_urls", [])
+            for career_url in career_urls:
+                if career_url not in response_data.career_pages:
+                    response_data.career_pages.append(career_url)
 
             # Log extraction results
             logger.info(f"📊 Extraction results for {request.url}:")
@@ -154,7 +405,7 @@ async def crawl_and_extract_contact_info(request: CrawlRequest):
             logger.info(f"   🔗 Social links: {len(response_data.social_links)}")
             logger.info(f"   💼 Career pages: {len(response_data.career_pages)}")
     else:
-        logger.error(f"❌ Requests failed for {request.url}")
+        logger.error(f"❌ Crawl failed for {request.url}")
 
     end_time = datetime.now()
     duration = (end_time - start_time).total_seconds()
@@ -165,8 +416,7 @@ async def crawl_and_extract_contact_info(request: CrawlRequest):
 @app.post("/batch_crawl_and_extract", response_model=BatchCrawlResponse)
 async def batch_crawl_and_extract(request: BatchCrawlRequest):
     """
-    Batch crawl multiple URLs (social links, career pages) and extract contact information.
-    This endpoint is designed to work with n8n workflow data.
+    Batch crawl multiple URLs with parallel processing
     """
     start_time = datetime.now()
     
@@ -201,7 +451,6 @@ async def batch_crawl_and_extract(request: BatchCrawlRequest):
         # Add social links
         if request.social:
             if isinstance(request.social, str):
-                # Handle case where social is passed as string
                 social_urls = [url.strip() for url in request.social.split(',') if url.strip()]
             else:
                 social_urls = request.social
@@ -211,7 +460,6 @@ async def batch_crawl_and_extract(request: BatchCrawlRequest):
         # Add career pages
         if request.career_page:
             if isinstance(request.career_page, str):
-                # Handle case where career_page is passed as string
                 career_urls = [url.strip() for url in request.career_page.split(',') if url.strip()]
             else:
                 career_urls = request.career_page
@@ -221,28 +469,48 @@ async def batch_crawl_and_extract(request: BatchCrawlRequest):
         # Add main domain if available
         if request.domain and not request.domain.startswith(('http://', 'https://')):
             main_url = f"https://{request.domain}"
-            urls_to_crawl.insert(0, main_url)  # Add main domain first
+            urls_to_crawl.insert(0, main_url)
         elif request.domain:
-            urls_to_crawl.insert(0, request.domain)  # Add main domain first
+            urls_to_crawl.insert(0, request.domain)
     
     response.total_urls_processed = len(urls_to_crawl)
     logger.info(f"📋 URLs to crawl: {response.total_urls_processed}")
     
-    # Crawl each URL
+    # Crawl URLs in parallel (with concurrency limit)
+    semaphore = asyncio.Semaphore(3)  # Limit to 3 concurrent crawls
+    
+    async def crawl_with_semaphore(url: str):
+        async with semaphore:
+            return await crawl_single_url(url)
+    
+    # Create tasks for parallel execution
+    tasks = [crawl_with_semaphore(url) for url in urls_to_crawl]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    
+    # Process results
     all_emails = set()
     all_social_links = set()
     all_career_pages = set()
     
-    for url in urls_to_crawl:
-        try:
-            logger.info(f"📡 Crawling: {url}")
-            result = extract_with_requests(url)
+    for i, result in enumerate(results):
+        url = urls_to_crawl[i]
+        
+        if isinstance(result, Exception):
+            logger.error(f"❌ Error crawling {url}: {str(result)}")
+            response.crawl_results.append({
+                "url": url,
+                "success": False,
+                "error_message": str(result)
+            })
+            continue
             
             crawl_result = {
                 "url": url,
                 "success": result.get("success", False),
                 "status_code": result.get("status_code"),
                 "error_message": result.get("error_message"),
+            "crawl_method": result.get("method", "unknown"),
+            "crawl_time": result.get("crawl_time", 0),
                 "emails": [],
                 "social_links": [],
                 "career_pages": []
@@ -279,15 +547,15 @@ async def batch_crawl_and_extract(request: BatchCrawlRequest):
                     all_social_links.update(classified_contacts.get("social_links", []))
                     all_career_pages.update(classified_contacts.get("career_pages", []))
             
-            response.crawl_results.append(crawl_result)
+            # Add career URLs found by improved method
+            career_urls = result.get("career_urls", [])
+            for career_url in career_urls:
+                if career_url not in crawl_result["career_pages"]:
+                    crawl_result["career_pages"].append(career_url)
+                if career_url not in all_career_pages:
+                    all_career_pages.add(career_url)
             
-        except Exception as e:
-            logger.error(f"❌ Error crawling {url}: {str(e)}")
-            response.crawl_results.append({
-                "url": url,
-                "success": False,
-                "error_message": str(e)
-            })
+            response.crawl_results.append(crawl_result)
     
     # Set final results
     response.emails = sorted(list(all_emails))
@@ -296,6 +564,8 @@ async def batch_crawl_and_extract(request: BatchCrawlRequest):
     
     end_time = datetime.now()
     duration = (end_time - start_time).total_seconds()
+    response.total_crawl_time = duration
+    
     logger.info(f"⏱️ Batch crawl completed in {duration:.2f}s")
     logger.info(f"📊 Results: {len(response.emails)} emails, {len(response.social_links)} social, {len(response.career_pages)} career")
     
@@ -305,13 +575,33 @@ async def batch_crawl_and_extract(request: BatchCrawlRequest):
 async def get_crawl_stats():
     """Get crawling statistics"""
     return {
-        "message": "Crawl API is running",
+        "message": "Improved Crawl API is running",
         "timestamp": datetime.now().isoformat(),
+        "cache_size": len(crawl_cache),
         "endpoints": {
             "single_crawl": "/crawl_and_extract_contact_info",
             "batch_crawl": "/batch_crawl_and_extract",
             "stats": "/stats"
+        },
+        "features": {
+            "playwright_primary": True,
+            "requests_fallback": True,
+            "parallel_processing": True,
+            "caching": True,
+            "vietnamese_optimized": True
         }
+    }
+
+@app.get("/clear_cache")
+async def clear_cache():
+    """Clear crawl cache"""
+    global crawl_cache
+    cache_size = len(crawl_cache)
+    crawl_cache.clear()
+    return {
+        "message": "Cache cleared",
+        "cleared_items": cache_size,
+        "timestamp": datetime.now().isoformat()
     }
 
 if __name__ == "__main__":
