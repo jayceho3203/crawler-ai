@@ -1,6 +1,6 @@
 FROM python:3.10-slim
 
-# Install system dependencies for requests and BeautifulSoup
+# Install system dependencies for requests, BeautifulSoup, and Playwright
 RUN apt-get update && apt-get install -y \
     wget \
     gnupg \
@@ -17,6 +17,9 @@ COPY requirements.txt .
 
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
+
+# Install Playwright browsers
+RUN playwright install chromium
 
 # Create non-root user for security
 RUN useradd -m -u 1000 appuser
