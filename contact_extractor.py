@@ -78,6 +78,85 @@ CAREER_KEYWORDS_VI: Set[str] = {
     'devops', 'qa', 'test', 'testing', 'ui', 'ux', 'design', 'product'
 }
 
+# HIGH PRIORITY career keywords - these are more likely to be actual career pages
+HIGH_PRIORITY_CAREER_KEYWORDS: Set[str] = {
+    # Vietnamese high priority
+    'tuyen-dung', 'tuyển-dụng', 'tuyendung',
+    'viec-lam', 'việc-làm', 'vieclam',
+    'co-hoi', 'cơ-hội', 'cohoi',
+    'nhan-vien', 'nhân-viên', 'nhanvien',
+    'ung-vien', 'ứng-viên', 'ungvien',
+    'cong-viec', 'công-việc', 'congviec',
+    'lam-viec', 'làm-việc', 'lamviec',
+    'moi', 'mời',
+    'thu-viec', 'thử-việc', 'thuviec',
+    'chinh-thuc', 'chính-thức', 'chinhthuc',
+    'tim-viec', 'tìm-việc', 'timviec',
+    'dang-tuyen', 'đang-tuyển', 'dangtuyen',
+    
+    # English high priority
+    'career', 'careers', 'job', 'jobs', 'hiring', 'recruitment',
+    'employment', 'vacancy', 'vacancies', 'opportunity', 'opportunities',
+    'position', 'positions', 'apply', 'application', 'applications',
+    'join-us', 'joinus', 'work-with-us', 'workwithus',
+    'open-role', 'open-roles', 'openrole', 'openroles',
+    'we-are-hiring', 'wearehiring', 'talent', 'team'
+}
+
+# Keywords that indicate NON-career content (should be excluded)
+NON_CAREER_KEYWORDS: Set[str] = {
+    # Content types
+    'blog', 'news', 'article', 'post', 'story', 'update', 'event',
+    'press', 'media', 'publication', 'whitepaper', 'case-study',
+    'success-story', 'testimonial', 'review', 'tutorial', 'guide',
+    
+    # Product/Service related
+    'product', 'service', 'solution', 'technology', 'platform',
+    'software', 'application', 'system', 'tool', 'feature',
+    'pricing', 'demo', 'trial', 'download', 'api', 'sdk',
+    
+    # Company info
+    'about', 'company', 'team', 'leadership', 'board', 'investor',
+    'partner', 'client', 'customer', 'contact', 'support', 'help',
+    
+    # Other business
+    'industry', 'market', 'trend', 'research', 'analysis', 'report',
+    'webinar', 'conference', 'workshop', 'training', 'certification',
+    'award', 'recognition', 'milestone', 'achievement'
+}
+
+# Career page path patterns that are more likely to be actual career pages
+CAREER_PATH_PATTERNS: Set[str] = {
+    # Vietnamese patterns
+    '/tuyen-dung', '/tuyển-dụng', '/tuyendung',
+    '/viec-lam', '/việc-làm', '/vieclam',
+    '/co-hoi', '/cơ-hội', '/cohoi',
+    '/nhan-vien', '/nhân-viên', '/nhanvien',
+    '/ung-vien', '/ứng-viên', '/ungvien',
+    '/cong-viec', '/công-việc', '/congviec',
+    '/lam-viec', '/làm-việc', '/lamviec',
+    '/moi', '/mời',
+    '/thu-viec', '/thử-việc', '/thuviec',
+    '/chinh-thuc', '/chính-thức', '/chinhthuc',
+    '/tim-viec', '/tìm-việc', '/timviec',
+    '/dang-tuyen', '/đang-tuyển', '/dangtuyen',
+    
+    # English patterns
+    '/career', '/careers', '/job', '/jobs', '/hiring', '/recruitment',
+    '/employment', '/vacancy', '/vacancies', '/opportunity', '/opportunities',
+    '/position', '/positions', '/apply', '/application', '/applications',
+    '/join-us', '/joinus', '/work-with-us', '/workwithus',
+    '/open-role', '/open-roles', '/openrole', '/openroles',
+    '/we-are-hiring', '/wearehiring', '/talent', '/team',
+    
+    # Common career page paths
+    '/careers/', '/jobs/', '/hiring/', '/recruitment/',
+    '/tuyen-dung/', '/viec-lam/', '/co-hoi/',
+    '/career/', '/job/', '/position/',
+    '/apply/', '/application/', '/join-us/',
+    '/work-with-us/', '/open-roles/', '/we-are-hiring/'
+}
+
 # Helper functions
 
 def extract_valid_email(email_str: str) -> Optional[str]:
@@ -202,7 +281,7 @@ def process_extracted_crawl_results(
 ) -> Dict[str, List[str]]:
     """
     Processes items extracted by a strategy (e.g., RegexExtractionStrategy as label, value pairs)
-    to find emails, social links, and career pages.
+    to find emails, social links, and career pages with STRICT filtering.
     """
     classified_contacts: Dict[str, List[str]] = {
         "emails": [],
@@ -225,13 +304,11 @@ def process_extracted_crawl_results(
 
     # Process emails found
     for email_str in emails_found_raw:
-        # Assuming extract_valid_email is a helper function available in the scope
-        # This function should perform validation and possibly normalization.
         valid_email = extract_valid_email(email_str)
         if valid_email:
             classified_contacts["emails"].append(valid_email)
 
-    # Process URLs found
+    # Process URLs found with STRICT career page filtering
     unique_social_links: Set[str] = set()
     unique_career_pages: Set[str] = set()
 
@@ -245,9 +322,9 @@ def process_extracted_crawl_results(
             domain = parsed_url.netloc.lower()
             path_lower = parsed_url.path.lower() if parsed_url.path else ""
             query_lower = parsed_url.query.lower()
+            full_path = f"{path_lower}?{query_lower}"
 
-            # Check for social links
-            # handles cases like "m.facebook.com" or "x.com" (formerly twitter)
+            # Check for social links first
             is_social = False
             for social_domain_part in SOCIAL_DOMAINS:
                 if social_domain_part == domain or domain.endswith(f".{social_domain_part}"):
@@ -255,52 +332,98 @@ def process_extracted_crawl_results(
                     break
             if is_social:
                 unique_social_links.add(normalized_url)
-                continue  # Prioritize as social, skip career check for this URL
+                continue  # Prioritize as social, skip career check
 
-            # Check for career pages
-            is_career_candidate = False
+            # STRICT career page detection
+            career_score = 0
+            max_score = 0
             
-            # Check both English and Vietnamese keywords
-            all_career_keywords = CAREER_KEYWORDS.union(CAREER_KEYWORDS_VI)
+            # EARLY REJECTION: If path contains strong non-career indicators, reject immediately
+            strong_non_career_indicators = ['blog', 'news', 'article', 'post', 'story', 'product', 'service', 'solution', 'about', 'contact', 'industry', 'market', 'research', 'analysis', 'report', 'webinar', 'conference', 'workshop', 'training', 'certification', 'award', 'recognition', 'milestone', 'achievement', 'case-study', 'success-story', 'testimonial', 'review', 'tutorial', 'guide', 'whitepaper', 'press', 'media', 'publication', 'tin-tuc', 'tin', 'impact', 'social', 'enterprise', 'doanh-nghiep', 'application', 'deployed', 'successfully', 'implementation', 'solution', 'technology', 'digital', 'transformation', 'business', 'customer', 'experience', 'management']
             
-            for keyword in all_career_keywords:
-                # Check keyword in the path or query parameters
+            has_strong_non_career = any(indicator in path_lower for indicator in strong_non_career_indicators)
+            if has_strong_non_career:
+                # Skip this URL entirely - it's definitely not a career page
+                continue
+            
+            # EARLY REJECTION: If path contains date patterns (YYYY/MM/DD or YYYY-MM-DD), reject
+            if re.search(r'/\d{4}[/-]\d{1,2}[/-]\d{1,2}', path_lower):
+                continue
+            
+            # EARLY REJECTION: If path contains long IDs (likely specific job posts), reject
+            if re.search(r'/[a-f0-9]{8,}', path_lower) or re.search(r'/\d{5,}', path_lower):
+                continue
+            
+            # Check for HIGH PRIORITY career keywords (score +3)
+            for keyword in HIGH_PRIORITY_CAREER_KEYWORDS:
                 if keyword in path_lower or keyword in query_lower:
-                    is_career_candidate = True
+                    career_score += 3
+                    max_score = max(max_score, 3)
                     break
             
-            if is_career_candidate:
-                # Add heuristic: check for common career path segments to reduce false positives
-                career_path_segments = [
-                    "career", "jobs", "hiring", "vacancy", "vacancies", "opportunity", "opportunities", 
-                    "work-with-us", "join-us", "apply", "recruitment", "careers", "open-roles",
-                    "tuyen-dung", "tuyển-dụng", "viec-lam", "việc-làm", "co-hoi", "cơ-hội",
-                    "nhan-vien", "nhân-viên", "ung-vien", "ứng-viên", "cong-viec", "công-việc",
-                    "lam-viec", "làm-việc", "moi", "mời", "thu-viec", "thử-việc"
+            # Check for career path patterns (score +2)
+            for pattern in CAREER_PATH_PATTERNS:
+                if pattern in full_path:
+                    career_score += 2
+                    max_score = max(max_score, 2)
+                    break
+            
+            # Check for other career keywords (score +1)
+            for keyword in CAREER_KEYWORDS.union(CAREER_KEYWORDS_VI):
+                if keyword in path_lower or keyword in query_lower:
+                    career_score += 1
+                    max_score = max(max_score, 1)
+                    break
+            
+            # PENALTY: Check for remaining non-career keywords (score -3)
+            for keyword in NON_CAREER_KEYWORDS:
+                if keyword in path_lower or keyword in query_lower:
+                    career_score -= 3
+                    break
+            
+            # PENALTY: Very long paths are less likely to be career pages (score -1)
+            path_segments = path_lower.strip('/').split('/')
+            if len(path_segments) > 4:
+                career_score -= 1
+            
+            # PENALTY: Paths with numbers/IDs are less likely to be main career pages (score -1)
+            if re.search(r'/\d+', path_lower) or re.search(r'/[a-f0-9]{8,}', path_lower):
+                career_score -= 1
+            
+            # Only accept URLs with positive career score AND at least one high-priority indicator
+            if career_score > 0 and max_score >= 2:
+                # ADDITIONAL STRICT CHECK: Must have clear career path pattern
+                has_clear_career_pattern = False
+                
+                # Check for exact career path patterns
+                career_exact_patterns = [
+                    '/tuyen-dung', '/tuyển-dụng', '/tuyendung',
+                    '/viec-lam', '/việc-làm', '/vieclam',
+                    '/co-hoi', '/cơ-hội', '/cohoi',
+                    '/nhan-vien', '/nhân-viên', '/nhanvien',
+                    '/ung-vien', '/ứng-viên', '/ungvien',
+                    '/cong-viec', '/công-việc', '/congviec',
+                    '/lam-viec', '/làm-việc', '/lamviec',
+                    '/moi', '/mời',
+                    '/thu-viec', '/thử-việc', '/thuviec',
+                    '/chinh-thuc', '/chính-thức', '/chinhthuc',
+                    '/tim-viec', '/tìm-việc', '/timviec',
+                    '/dang-tuyen', '/đang-tuyển', '/dangtuyen',
+                    '/career', '/careers', '/job', '/jobs', '/hiring', '/recruitment',
+                    '/employment', '/vacancy', '/vacancies', '/opportunity', '/opportunities',
+                    '/position', '/positions', '/apply', '/application', '/applications',
+                    '/join-us', '/joinus', '/work-with-us', '/workwithus',
+                    '/open-role', '/open-roles', '/openrole', '/openroles',
+                    '/we-are-hiring', '/wearehiring', '/talent', '/team'
                 ]
-                path_and_query = f"{path_lower}?{query_lower}"
-
-                has_career_segment = False
-                for segment in career_path_segments:
-                    # Check for segment as a whole word or part of a path/query parameter
-                    if f"/{segment}/" in path_and_query or \
-                       path_and_query.endswith(f"/{segment}") or \
-                       path_and_query.startswith(f"{segment}/") or \
-                       f"/{segment}." in path_and_query or \
-                       f"_{segment}" in path_and_query or \
-                       f"-{segment}" in path_and_query or \
-                       f"{segment}=" in path_and_query or \
-                       f"&{segment}=" in path_and_query or \
-                       f"?{segment}=" in path_and_query or \
-                       segment == path_lower.strip('/'): # e.g. /careers
-                        has_career_segment = True
+                
+                for pattern in career_exact_patterns:
+                    if pattern in path_lower:
+                        has_clear_career_pattern = True
                         break
                 
-                if has_career_segment:
-                    unique_career_pages.add(normalized_url)
-                # Avoid classifying generic blog posts or news articles that might mention "job"
-                # Simpler paths are more likely career pages if keyword matched and not clearly other content type
-                elif not any(s in path_lower for s in ["blog", "news", "article", "post", "story", "update", "event"]) and len(path_lower.split('/')) <= 4 :
+                # Only accept if has clear career pattern
+                if has_clear_career_pattern:
                     unique_career_pages.add(normalized_url)
 
         except Exception:
@@ -308,7 +431,7 @@ def process_extracted_crawl_results(
             pass
 
     return {
-        "emails": sorted(list(set(classified_contacts["emails"]))), # Ensure uniqueness and sort
+        "emails": sorted(list(set(classified_contacts["emails"]))),
         "social_links": sorted(list(unique_social_links)),
         "career_pages": sorted(list(unique_career_pages)),
     }
