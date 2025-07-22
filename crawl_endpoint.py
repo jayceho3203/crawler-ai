@@ -21,6 +21,9 @@ from contact_extractor import (
     process_extracted_crawl_results,
     SOCIAL_DOMAINS,
     CAREER_KEYWORDS,
+    HIGH_PRIORITY_CAREER_KEYWORDS,
+    NON_CAREER_KEYWORDS,
+    CAREER_PATH_PATTERNS,
     normalize_url
 )
 
@@ -32,20 +35,41 @@ app = FastAPI()
 
 # Vietnamese software company career keywords
 CAREER_KEYWORDS_VI = [
-    # Vietnamese keywords
-    'tuyen-dung', 'tuyển-dụng', 'tuyen-dung', 'tuyển-dụng',
-    'viec-lam', 'việc-làm', 'viec-lam', 'việc-làm',
-    'co-hoi', 'cơ-hội', 'co-hoi', 'cơ-hội',
-    'nhan-vien', 'nhân-viên', 'nhan-vien', 'nhân-viên',
-    'tuyen', 'tuyển', 'tuyen', 'tuyển',
-    'ung-vien', 'ứng-viên', 'ung-vien', 'ứng-viên',
-    'cong-viec', 'công-việc', 'cong-viec', 'công-việc',
-    'lam-viec', 'làm-việc', 'lam-viec', 'làm-việc',
-    'moi', 'mời', 'moi', 'mời',
-    'thu-viec', 'thử-việc', 'thu-viec', 'thử-việc',
-    'chinh-thuc', 'chính-thức', 'chinh-thuc', 'chính-thức',
-    
-    # English keywords
+    # Vietnamese keywords (with and without accents, with and without spaces, no duplicates)
+    'tuyen-dung', 'tuyển-dụng', 'tuyendung',
+    'viec-lam', 'việc-làm', 'vieclam',
+    'co-hoi', 'cơ-hội', 'cohoi',
+    'nhan-vien', 'nhân-viên', 'nhanvien',
+    'tuyen', 'tuyển',
+    'ung-vien', 'ứng-viên', 'ungvien',
+    'cong-viec', 'công-việc', 'congviec',
+    'lam-viec', 'làm-việc', 'lamviec',
+    'moi', 'mời',
+    'thu-viec', 'thử-việc', 'thuviec',
+    'chinh-thuc', 'chính-thức', 'chinhthuc',
+    'nghe-nghiep', 'nghề-nghiệp', 'nghenghiep',
+    'co-hoi-nghe-nghiep', 'cơ-hội-nghề-nghiệp', 'cohoinghenghiep',
+    'tim-viec', 'tìm-việc', 'timviec',
+    'dang-tuyen', 'đang-tuyển', 'dangtuyen',
+    'tuyen-dung-nhan-vien', 'tuyển-dụng-nhân-viên', 'tuyendungnhanvien',
+    'tuyen-dung-developer', 'tuyển-dụng-developer', 'tuyendungdeveloper',
+    'tuyen-dung-engineer', 'tuyển-dụng-engineer', 'tuyendungengineer',
+    'tuyen-dung-analyst', 'tuyển-dụng-analyst', 'tuyendunganalyst',
+    'tuyen-dung-manager', 'tuyển-dụng-manager', 'tuyendungmanager',
+    'tuyen-dung-designer', 'tuyển-dụng-designer', 'tuyendungdesigner',
+    'tuyen-dung-tester', 'tuyển-dụng-tester', 'tuyendungtester',
+    'tuyen-dung-qa', 'tuyển-dụng-qa', 'tuyendungqa',
+    'tuyen-dung-devops', 'tuyển-dụng-devops', 'tuyendungdevops',
+    'tuyen-dung-data', 'tuyển-dụng-data', 'tuyendungdata',
+    'tuyen-dung-ai', 'tuyển-dụng-ai', 'tuyendungai',
+    'tuyen-dung-ml', 'tuyển-dụng-ml', 'tuyendungml',
+    'tuyen-dung-ui', 'tuyển-dụng-ui', 'tuyendungui',
+    'tuyen-dung-ux', 'tuyển-dụng-ux', 'tuyendungux',
+    'tuyen-dung-pm', 'tuyển-dụng-pm', 'tuyendungpm',
+    'tuyen-dung-ba', 'tuyển-dụng-ba', 'tuyendungba',
+    'tuyen-dung-scrum', 'tuyển-dụng-scrum', 'tuyendungscrum',
+    'tuyen-dung-agile', 'tuyển-dụng-agile', 'tuyendungagile',
+    # English keywords (no duplicates)
     'developer', 'dev', 'programmer', 'engineer',
     'software', 'tech', 'technology', 'it',
     'career', 'job', 'recruitment', 'employment',
@@ -311,13 +335,128 @@ async def extract_with_playwright(url: str) -> Dict:
             except:
                 pass
             
-            # Also check URLs for career keywords
-            for url_found in urls:
+            # STRICT career page detection from career_urls
+            filtered_career_urls = []
+            for url_found in career_urls:
                 url_lower = url_found.lower()
-                for keyword in CAREER_KEYWORDS_VI:
-                    if keyword in url_lower:
-                        career_urls.append(url_found)
+                parsed_url = urlparse(url_found)
+                path_lower = parsed_url.path.lower() if parsed_url.path else ""
+                query_lower = parsed_url.query.lower()
+                full_path = f"{path_lower}?{query_lower}"
+                
+                # EARLY REJECTION: If path contains strong non-career indicators, reject immediately
+                strong_non_career_indicators = ['blog', 'news', 'article', 'post', 'story', 'product', 'service', 'solution', 'about', 'contact', 'industry', 'market', 'research', 'analysis', 'report', 'webinar', 'conference', 'workshop', 'training', 'certification', 'award', 'recognition', 'milestone', 'achievement', 'case-study', 'success-story', 'testimonial', 'review', 'tutorial', 'guide', 'whitepaper', 'press', 'media', 'publication', 'tin-tuc', 'tin', 'impact', 'social', 'enterprise', 'doanh-nghiep', 'application', 'deployed', 'successfully', 'implementation', 'solution', 'technology', 'digital', 'transformation', 'business', 'customer', 'experience', 'management']
+                
+                has_strong_non_career = any(indicator in path_lower for indicator in strong_non_career_indicators)
+                if has_strong_non_career:
+                    # Skip this URL entirely - it's definitely not a career page
+                    continue
+                
+                # EARLY REJECTION: If path contains date patterns (YYYY/MM/DD or YYYY-MM-DD), reject
+                if re.search(r'/\d{4}[/-]\d{1,2}[/-]\d{1,2}', path_lower):
+                    continue
+                
+                # EARLY REJECTION: If path contains long IDs (likely specific job posts), reject
+                if re.search(r'/[a-f0-9]{8,}', path_lower) or re.search(r'/\d{5,}', path_lower):
+                    continue
+                
+                career_score = 0
+                max_score = 0
+                
+                # Check for HIGH PRIORITY career keywords (score +3)
+                for keyword in HIGH_PRIORITY_CAREER_KEYWORDS:
+                    if keyword in path_lower or keyword in query_lower:
+                        career_score += 3
+                        max_score = max(max_score, 3)
                         break
+                
+                # Check for career path patterns (score +2)
+                for pattern in CAREER_PATH_PATTERNS:
+                    if pattern in full_path:
+                        career_score += 2
+                        max_score = max(max_score, 2)
+                        break
+                
+                # Check for other career keywords (score +1)
+                for keyword in CAREER_KEYWORDS_VI:
+                    if keyword in path_lower or keyword in query_lower:
+                        career_score += 1
+                        max_score = max(max_score, 1)
+                        break
+                
+                # PENALTY: Check for remaining non-career keywords (score -3)
+                for keyword in NON_CAREER_KEYWORDS:
+                    if keyword in path_lower or keyword in query_lower:
+                        career_score -= 3
+                        break
+                
+                # PENALTY: Very long paths are less likely to be career pages (score -1)
+                path_segments = path_lower.strip('/').split('/')
+                if len(path_segments) > 4:
+                    career_score -= 1
+                
+                # PENALTY: Paths with numbers/IDs are less likely to be main career pages (score -1)
+                if re.search(r'/\d+', path_lower) or re.search(r'/[a-f0-9]{8,}', path_lower):
+                    career_score -= 1
+                
+                # Only accept URLs with positive career score AND at least one high-priority indicator
+                if career_score > 0 and max_score >= 2:
+                    # ADDITIONAL STRICT CHECK: Must have clear career path pattern
+                    has_clear_career_pattern = False
+                    
+                    # Check for exact career path patterns
+                    career_exact_patterns = [
+                        '/tuyen-dung', '/tuyển-dụng', '/tuyendung',
+                        '/viec-lam', '/việc-làm', '/vieclam',
+                        '/co-hoi', '/cơ-hội', '/cohoi',
+                        '/nhan-vien', '/nhân-viên', '/nhanvien',
+                        '/ung-vien', '/ứng-viên', '/ungvien',
+                        '/cong-viec', '/công-việc', '/congviec',
+                        '/lam-viec', '/làm-việc', '/lamviec',
+                        '/moi', '/mời',
+                        '/thu-viec', '/thử-việc', '/thuviec',
+                        '/chinh-thuc', '/chính-thức', '/chinhthuc',
+                        '/nghe-nghiep', '/nghề-nghiệp', '/nghenghiep',
+                        '/co-hoi-nghe-nghiep', '/cơ-hội-nghề-nghiệp', '/cohoinghenghiep',
+                        '/tim-viec', '/tìm-việc', '/timviec',
+                        '/dang-tuyen', '/đang-tuyển', '/dangtuyen',
+                        '/tuyen-dung-nhan-vien', '/tuyển-dụng-nhân-viên', '/tuyendungnhanvien',
+                        '/tuyen-dung-developer', '/tuyển-dụng-developer', '/tuyendungdeveloper',
+                        '/tuyen-dung-engineer', '/tuyển-dụng-engineer', '/tuyendungengineer',
+                        '/tuyen-dung-analyst', '/tuyển-dụng-analyst', '/tuyendunganalyst',
+                        '/tuyen-dung-manager', '/tuyển-dụng-manager', '/tuyendungmanager',
+                        '/tuyen-dung-designer', '/tuyển-dụng-designer', '/tuyendungdesigner',
+                        '/tuyen-dung-tester', '/tuyển-dụng-tester', '/tuyendungtester',
+                        '/tuyen-dung-qa', '/tuyển-dụng-qa', '/tuyendungqa',
+                        '/tuyen-dung-devops', '/tuyển-dụng-devops', '/tuyendungdevops',
+                        '/tuyen-dung-data', '/tuyển-dụng-data', '/tuyendungdata',
+                        '/tuyen-dung-ai', '/tuyển-dụng-ai', '/tuyendungai',
+                        '/tuyen-dung-ml', '/tuyển-dụng-ml', '/tuyendungml',
+                        '/tuyen-dung-ui', '/tuyển-dụng-ui', '/tuyendungui',
+                        '/tuyen-dung-ux', '/tuyển-dụng-ux', '/tuyendungux',
+                        '/tuyen-dung-pm', '/tuyển-dụng-pm', '/tuyendungpm',
+                        '/tuyen-dung-ba', '/tuyển-dụng-ba', '/tuyendungba',
+                        '/tuyen-dung-scrum', '/tuyển-dụng-scrum', '/tuyendungscrum',
+                        '/tuyen-dung-agile', '/tuyển-dụng-agile', '/tuyendungagile',
+                        '/career', '/careers', '/job', '/jobs', '/hiring', '/recruitment',
+                        '/employment', '/vacancy', '/vacancies', '/opportunity', '/opportunities',
+                        '/position', '/positions', '/apply', '/application', '/applications',
+                        '/join-us', '/joinus', '/work-with-us', '/workwithus',
+                        '/open-role', '/open-roles', '/openrole', '/openroles',
+                        '/we-are-hiring', '/wearehiring', '/talent', '/team'
+                    ]
+                    
+                    for pattern in career_exact_patterns:
+                        if pattern in path_lower:
+                            has_clear_career_pattern = True
+                            break
+                    
+                    # Only accept if has clear career pattern
+                    if has_clear_career_pattern:
+                        filtered_career_urls.append(url_found)
+            
+            # Replace career_urls with filtered version
+            career_urls = filtered_career_urls
             
             # Check if this is a job board and extract company career pages
             if is_job_board_url(url):
@@ -389,6 +528,129 @@ def extract_with_requests(url: str) -> Dict:
                 if keyword in url_lower:
                     career_urls.append(url_found)
                     break
+        
+        # STRICT career page detection from career_urls
+        filtered_career_urls = []
+        for url_found in career_urls:
+            url_lower = url_found.lower()
+            parsed_url = urlparse(url_found)
+            path_lower = parsed_url.path.lower() if parsed_url.path else ""
+            query_lower = parsed_url.query.lower()
+            full_path = f"{path_lower}?{query_lower}"
+            
+            # EARLY REJECTION: If path contains strong non-career indicators, reject immediately
+            strong_non_career_indicators = ['blog', 'news', 'article', 'post', 'story', 'product', 'service', 'solution', 'about', 'contact', 'industry', 'market', 'research', 'analysis', 'report', 'webinar', 'conference', 'workshop', 'training', 'certification', 'award', 'recognition', 'milestone', 'achievement', 'case-study', 'success-story', 'testimonial', 'review', 'tutorial', 'guide', 'whitepaper', 'press', 'media', 'publication', 'tin-tuc', 'tin', 'impact', 'social', 'enterprise', 'doanh-nghiep', 'application', 'deployed', 'successfully', 'implementation', 'solution', 'technology', 'digital', 'transformation', 'business', 'customer', 'experience', 'management']
+            
+            has_strong_non_career = any(indicator in path_lower for indicator in strong_non_career_indicators)
+            if has_strong_non_career:
+                # Skip this URL entirely - it's definitely not a career page
+                continue
+            
+            # EARLY REJECTION: If path contains date patterns (YYYY/MM/DD or YYYY-MM-DD), reject
+            if re.search(r'/\d{4}[/-]\d{1,2}[/-]\d{1,2}', path_lower):
+                continue
+            
+            # EARLY REJECTION: If path contains long IDs (likely specific job posts), reject
+            if re.search(r'/[a-f0-9]{8,}', path_lower) or re.search(r'/\d{5,}', path_lower):
+                continue
+            
+            career_score = 0
+            max_score = 0
+            
+            # Check for HIGH PRIORITY career keywords (score +3)
+            for keyword in HIGH_PRIORITY_CAREER_KEYWORDS:
+                if keyword in path_lower or keyword in query_lower:
+                    career_score += 3
+                    max_score = max(max_score, 3)
+                    break
+            
+            # Check for career path patterns (score +2)
+            for pattern in CAREER_PATH_PATTERNS:
+                if pattern in full_path:
+                    career_score += 2
+                    max_score = max(max_score, 2)
+                    break
+            
+            # Check for other career keywords (score +1)
+            for keyword in CAREER_KEYWORDS_VI:
+                if keyword in path_lower or keyword in query_lower:
+                    career_score += 1
+                    max_score = max(max_score, 1)
+                    break
+            
+            # PENALTY: Check for remaining non-career keywords (score -3)
+            for keyword in NON_CAREER_KEYWORDS:
+                if keyword in path_lower or keyword in query_lower:
+                    career_score -= 3
+                    break
+            
+            # PENALTY: Very long paths are less likely to be career pages (score -1)
+            path_segments = path_lower.strip('/').split('/')
+            if len(path_segments) > 4:
+                career_score -= 1
+            
+            # PENALTY: Paths with numbers/IDs are less likely to be main career pages (score -1)
+            if re.search(r'/\d+', path_lower) or re.search(r'/[a-f0-9]{8,}', path_lower):
+                career_score -= 1
+            
+            # Only accept URLs with positive career score AND at least one high-priority indicator
+            if career_score > 0 and max_score >= 2:
+                # ADDITIONAL STRICT CHECK: Must have clear career path pattern
+                has_clear_career_pattern = False
+                
+                # Check for exact career path patterns
+                career_exact_patterns = [
+                    '/tuyen-dung', '/tuyển-dụng', '/tuyendung',
+                    '/viec-lam', '/việc-làm', '/vieclam',
+                    '/co-hoi', '/cơ-hội', '/cohoi',
+                    '/nhan-vien', '/nhân-viên', '/nhanvien',
+                    '/ung-vien', '/ứng-viên', '/ungvien',
+                    '/cong-viec', '/công-việc', '/congviec',
+                    '/lam-viec', '/làm-việc', '/lamviec',
+                    '/moi', '/mời',
+                    '/thu-viec', '/thử-việc', '/thuviec',
+                    '/chinh-thuc', '/chính-thức', '/chinhthuc',
+                    '/nghe-nghiep', '/nghề-nghiệp', '/nghenghiep',
+                    '/co-hoi-nghe-nghiep', '/cơ-hội-nghề-nghiệp', '/cohoinghenghiep',
+                    '/tim-viec', '/tìm-việc', '/timviec',
+                    '/dang-tuyen', '/đang-tuyển', '/dangtuyen',
+                    '/tuyen-dung-nhan-vien', '/tuyển-dụng-nhân-viên', '/tuyendungnhanvien',
+                    '/tuyen-dung-developer', '/tuyển-dụng-developer', '/tuyendungdeveloper',
+                    '/tuyen-dung-engineer', '/tuyển-dụng-engineer', '/tuyendungengineer',
+                    '/tuyen-dung-analyst', '/tuyển-dụng-analyst', '/tuyendunganalyst',
+                    '/tuyen-dung-manager', '/tuyển-dụng-manager', '/tuyendungmanager',
+                    '/tuyen-dung-designer', '/tuyển-dụng-designer', '/tuyendungdesigner',
+                    '/tuyen-dung-tester', '/tuyển-dụng-tester', '/tuyendungtester',
+                    '/tuyen-dung-qa', '/tuyển-dụng-qa', '/tuyendungqa',
+                    '/tuyen-dung-devops', '/tuyển-dụng-devops', '/tuyendungdevops',
+                    '/tuyen-dung-data', '/tuyển-dụng-data', '/tuyendungdata',
+                    '/tuyen-dung-ai', '/tuyển-dụng-ai', '/tuyendungai',
+                    '/tuyen-dung-ml', '/tuyển-dụng-ml', '/tuyendungml',
+                    '/tuyen-dung-ui', '/tuyển-dụng-ui', '/tuyendungui',
+                    '/tuyen-dung-ux', '/tuyển-dụng-ux', '/tuyendungux',
+                    '/tuyen-dung-pm', '/tuyển-dụng-pm', '/tuyendungpm',
+                    '/tuyen-dung-ba', '/tuyển-dụng-ba', '/tuyendungba',
+                    '/tuyen-dung-scrum', '/tuyển-dụng-scrum', '/tuyendungscrum',
+                    '/tuyen-dung-agile', '/tuyển-dụng-agile', '/tuyendungagile',
+                    '/career', '/careers', '/job', '/jobs', '/hiring', '/recruitment',
+                    '/employment', '/vacancy', '/vacancies', '/opportunity', '/opportunities',
+                    '/position', '/positions', '/apply', '/application', '/applications',
+                    '/join-us', '/joinus', '/work-with-us', '/workwithus',
+                    '/open-role', '/open-roles', '/openrole', '/openroles',
+                    '/we-are-hiring', '/wearehiring', '/talent', '/team'
+                ]
+                
+                for pattern in career_exact_patterns:
+                    if pattern in path_lower:
+                        has_clear_career_pattern = True
+                        break
+                
+                # Only accept if has clear career pattern
+                if has_clear_career_pattern:
+                    filtered_career_urls.append(url_found)
+        
+        # Replace career_urls with filtered version
+        career_urls = filtered_career_urls
         
         crawl_time = time.time() - start_time
         logger.info(f"✅ Requests fallback completed: {url} - {crawl_time:.2f}s")
@@ -626,59 +888,59 @@ async def batch_crawl_and_extract(request: BatchCrawlRequest):
                 "error_message": str(result)
             })
             continue
-        
-        crawl_result = {
-            "url": url,
-            "success": result.get("success", False),
-            "status_code": result.get("status_code"),
-            "error_message": result.get("error_message"),
+            
+            crawl_result = {
+                "url": url,
+                "success": result.get("success", False),
+                "status_code": result.get("status_code"),
+                "error_message": result.get("error_message"),
             "crawl_method": result.get("method", "unknown"),
             "crawl_time": result.get("crawl_time", 0),
-            "emails": [],
-            "social_links": [],
-            "career_pages": []
-        }
-        
-        if result.get("success"):
-            response.successful_crawls += 1
+                "emails": [],
+                "social_links": [],
+                "career_pages": []
+            }
             
-            # Process extracted data
-            data_for_extractor = []
-            
-            # Add emails
-            for email in result.get("emails", []):
-                data_for_extractor.append({"label": "email", "value": email})
-                all_emails.add(email)
-            
-            # Add URLs
-            for url_found in result.get("urls", []):
-                data_for_extractor.append({"label": "url", "value": url_found})
-            
-            # Process with contact extractor
-            if data_for_extractor:
-                classified_contacts = process_extracted_crawl_results(
-                    raw_extracted_list=data_for_extractor,
-                    base_url=result.get("url", url)
-                )
+            if result.get("success"):
+                response.successful_crawls += 1
                 
-                crawl_result["emails"] = classified_contacts.get("emails", [])
-                crawl_result["social_links"] = classified_contacts.get("social_links", [])
-                crawl_result["career_pages"] = classified_contacts.get("career_pages", [])
+                # Process extracted data
+                data_for_extractor = []
                 
-                # Add to global sets
-                all_emails.update(classified_contacts.get("emails", []))
-                all_social_links.update(classified_contacts.get("social_links", []))
-                all_career_pages.update(classified_contacts.get("career_pages", []))
-        
-        # Add career URLs found by improved method
-        career_urls = result.get("career_urls", [])
-        for career_url in career_urls:
-            if career_url not in crawl_result["career_pages"]:
-                crawl_result["career_pages"].append(career_url)
-            if career_url not in all_career_pages:
-                all_career_pages.add(career_url)
-        
-        response.crawl_results.append(crawl_result)
+                # Add emails
+                for email in result.get("emails", []):
+                    data_for_extractor.append({"label": "email", "value": email})
+                    all_emails.add(email)
+                
+                # Add URLs
+                for url_found in result.get("urls", []):
+                    data_for_extractor.append({"label": "url", "value": url_found})
+                
+                # Process with contact extractor
+                if data_for_extractor:
+                    classified_contacts = process_extracted_crawl_results(
+                        raw_extracted_list=data_for_extractor,
+                        base_url=result.get("url", url)
+                    )
+                    
+                    crawl_result["emails"] = classified_contacts.get("emails", [])
+                    crawl_result["social_links"] = classified_contacts.get("social_links", [])
+                    crawl_result["career_pages"] = classified_contacts.get("career_pages", [])
+                    
+                    # Add to global sets
+                    all_emails.update(classified_contacts.get("emails", []))
+                    all_social_links.update(classified_contacts.get("social_links", []))
+                    all_career_pages.update(classified_contacts.get("career_pages", []))
+            
+            # Add career URLs found by improved method
+            career_urls = result.get("career_urls", [])
+            for career_url in career_urls:
+                if career_url not in crawl_result["career_pages"]:
+                    crawl_result["career_pages"].append(career_url)
+                if career_url not in all_career_pages:
+                    all_career_pages.add(career_url)
+            
+            response.crawl_results.append(crawl_result)
     
     # Set final results
     response.emails = sorted(list(all_emails))
