@@ -32,21 +32,90 @@ app = FastAPI()
 
 # Vietnamese software company career keywords
 CAREER_KEYWORDS_VI = [
+    # Vietnamese keywords
     'tuyen-dung', 'tuyển-dụng', 'tuyen-dung', 'tuyển-dụng',
     'viec-lam', 'việc-làm', 'viec-lam', 'việc-làm',
     'co-hoi', 'cơ-hội', 'co-hoi', 'cơ-hội',
     'nhan-vien', 'nhân-viên', 'nhan-vien', 'nhân-viên',
+    'tuyen', 'tuyển', 'tuyen', 'tuyển',
+    'ung-vien', 'ứng-viên', 'ung-vien', 'ứng-viên',
+    'cong-viec', 'công-việc', 'cong-viec', 'công-việc',
+    'lam-viec', 'làm-việc', 'lam-viec', 'làm-việc',
+    'moi', 'mời', 'moi', 'mời',
+    'thu-viec', 'thử-việc', 'thu-viec', 'thử-việc',
+    'chinh-thuc', 'chính-thức', 'chinh-thuc', 'chính-thức',
+    
+    # English keywords
     'developer', 'dev', 'programmer', 'engineer',
     'software', 'tech', 'technology', 'it',
     'career', 'job', 'recruitment', 'employment',
     'work', 'position', 'opportunity', 'vacancy',
-    'tuyen', 'tuyển', 'tuyen', 'tuyển',
     'apply', 'application', 'hiring', 'join-us',
-    'team', 'talent', 'careers', 'jobs'
+    'team', 'talent', 'careers', 'jobs',
+    'open-role', 'open-roles', 'we-are-hiring',
+    'work-with-us', 'join-our-team', 'grow-with-us',
+    'build-with-us', 'create-with-us', 'innovate-with-us',
+    'full-time', 'part-time', 'remote', 'hybrid',
+    'onsite', 'on-site', 'freelance', 'contract',
+    'internship', 'intern', 'graduate', 'entry-level',
+    'senior', 'junior', 'lead', 'principal',
+    'frontend', 'front-end', 'backend', 'back-end',
+    'fullstack', 'full-stack', 'mobile', 'web',
+    'data', 'ai', 'ml', 'machine-learning',
+    'devops', 'qa', 'test', 'testing',
+    'ui', 'ux', 'design', 'product'
 ]
 
+# Common job board platforms
+JOB_BOARD_DOMAINS = {
+    'topcv.vn', 'careerbuilder.vn', 'jobstreet.vn', 'vietnamworks.com',
+    'mywork.com.vn', '123job.vn', 'timviec365.vn', 'careerlink.vn',
+    'indeed.com', 'linkedin.com/jobs', 'glassdoor.com', 'monster.com',
+    'ziprecruiter.com', 'simplyhired.com', 'dice.com', 'angel.co',
+    'stackoverflow.com/jobs', 'github.com/jobs', 'remote.co', 'weworkremotely.com'
+}
+
+def is_job_board_url(url: str) -> bool:
+    """Check if URL is from a known job board platform"""
+    parsed = urlparse(url)
+    domain = parsed.netloc.lower()
+    
+    # Remove www. prefix for comparison
+    if domain.startswith('www.'):
+        domain = domain[4:]
+    
+    return domain in JOB_BOARD_DOMAINS
+
+def extract_career_pages_from_job_board(html_content: str, base_url: str) -> List[str]:
+    """Extract company career pages from job board listings"""
+    career_pages = []
+    soup = BeautifulSoup(html_content, 'html.parser')
+    
+    # Common patterns for company links on job boards
+    company_selectors = [
+        'a[href*="/company/"]', 'a[href*="/employer/"]', 'a[href*="/recruiter/"]',
+        'a[href*="/business/"]', 'a[href*="/client/"]', 'a[href*="/partner/"]',
+        '.company-name a', '.employer-name a', '.business-name a',
+        '[data-company] a', '[data-employer] a', '.job-company a'
+    ]
+    
+    for selector in company_selectors:
+        try:
+            elements = soup.select(selector)
+            for element in elements:
+                href = element.get('href')
+                if href:
+                    full_url = urljoin(base_url, href)
+                    # Only add if it's not the same job board
+                    if not is_job_board_url(full_url):
+                        career_pages.append(full_url)
+        except:
+            continue
+    
+    return list(set(career_pages))
+
 # Software company career selectors
-EDUCATION_SELECTORS = [
+CAREER_SELECTORS = [
     'a[href*="tuyen-dung"]', 'a[href*="viec-lam"]',
     'a[href*="career"]', 'a[href*="job"]',
     'a[href*="recruitment"]', 'a[href*="employment"]',
@@ -54,9 +123,15 @@ EDUCATION_SELECTORS = [
     'a[href*="software"]', 'a[href*="tech"]',
     'a[href*="hiring"]', 'a[href*="join-us"]',
     'a[href*="talent"]', 'a[href*="team"]',
+    'a[href*="apply"]', 'a[href*="position"]',
+    'a[href*="vacancy"]', 'a[href*="opportunity"]',
+    'a[href*="open-role"]', 'a[href*="open-roles"]',
+    'a[href*="we-are-hiring"]', 'a[href*="work-with-us"]',
     '.menu a', '.nav a', 'header a', 'footer a',
     'nav a', '.navigation a', '.navbar a',
-    '.careers a', '.jobs a', '.team a'
+    '.careers a', '.jobs a', '.team a',
+    '.career a', '.job a', '.hiring a',
+    '.recruitment a', '.talent a', '.apply a'
 ]
 
 # Cache for crawl results
@@ -90,6 +165,9 @@ class CrawlResponse(BaseModel):
     fit_markdown: Optional[str] = None
     crawl_method: Optional[str] = None
     crawl_time: Optional[float] = None
+    # Job extraction fields
+    total_jobs_found: Optional[int] = None
+    jobs: Optional[List[Dict]] = None
 
 class BatchCrawlResponse(BaseModel):
     company_name: Optional[str] = None
@@ -220,7 +298,7 @@ async def extract_with_playwright(url: str) -> Dict:
             # Look specifically for career-related links
             career_urls = []
             try:
-                for selector in EDUCATION_SELECTORS:
+                for selector in CAREER_SELECTORS:
                     try:
                         elements = await page.query_selector_all(selector)
                         for element in elements:
@@ -240,6 +318,13 @@ async def extract_with_playwright(url: str) -> Dict:
                     if keyword in url_lower:
                         career_urls.append(url_found)
                         break
+            
+            # Check if this is a job board and extract company career pages
+            if is_job_board_url(url):
+                logger.info(f"🎯 Detected job board: {url}")
+                job_board_career_pages = extract_career_pages_from_job_board(html_content, url)
+                career_urls.extend(job_board_career_pages)
+                logger.info(f"📋 Found {len(job_board_career_pages)} company career pages from job board")
             
             await browser.close()
             
@@ -399,11 +484,49 @@ async def crawl_and_extract_contact_info(request: CrawlRequest):
                 if career_url not in response_data.career_pages:
                     response_data.career_pages.append(career_url)
 
+            # NEW: Extract jobs from career pages
+            if response_data.career_pages:
+                logger.info(f"💼 Found {len(response_data.career_pages)} career pages, extracting jobs...")
+                
+                try:
+                    from job_extractor import extract_jobs_from_multiple_pages
+                    
+                    # Extract jobs from career pages (limit to 10 jobs per page to avoid timeout)
+                    job_result = extract_jobs_from_multiple_pages(response_data.career_pages, max_jobs_per_page=10)
+                    
+                    if job_result.get("success"):
+                        jobs_found = job_result.get("jobs", [])
+                        logger.info(f"✅ Job extraction completed: {len(jobs_found)} jobs found")
+                        
+                        # Add jobs to response
+                        response_data.total_jobs_found = len(jobs_found)
+                        response_data.jobs = jobs_found
+                        
+                        # Also add to fit_markdown for backward compatibility
+                        import json
+                        response_data.fit_markdown = json.dumps({
+                            "jobs": jobs_found,
+                            "total_jobs_found": len(jobs_found),
+                            "career_pages_processed": len(response_data.career_pages),
+                            "job_extraction_time": time.strftime('%Y-%m-%d %H:%M:%S')
+                        })
+                    else:
+                        logger.warning(f"⚠️ Job extraction failed: {job_result.get('error', 'Unknown error')}")
+                        
+                except ImportError:
+                    logger.warning("⚠️ Job extractor module not available, skipping job extraction")
+                except Exception as e:
+                    logger.error(f"❌ Error during job extraction: {str(e)}")
+
             # Log extraction results
             logger.info(f"📊 Extraction results for {request.url}:")
             logger.info(f"   📧 Emails: {len(response_data.emails)}")
             logger.info(f"   🔗 Social links: {len(response_data.social_links)}")
             logger.info(f"   💼 Career pages: {len(response_data.career_pages)}")
+            
+            # Log job extraction results if available
+            if response_data.total_jobs_found:
+                logger.info(f"   💼 Jobs found: {response_data.total_jobs_found}")
     else:
         logger.error(f"❌ Crawl failed for {request.url}")
 
@@ -503,59 +626,59 @@ async def batch_crawl_and_extract(request: BatchCrawlRequest):
                 "error_message": str(result)
             })
             continue
-            
-            crawl_result = {
-                "url": url,
-                "success": result.get("success", False),
-                "status_code": result.get("status_code"),
-                "error_message": result.get("error_message"),
+        
+        crawl_result = {
+            "url": url,
+            "success": result.get("success", False),
+            "status_code": result.get("status_code"),
+            "error_message": result.get("error_message"),
             "crawl_method": result.get("method", "unknown"),
             "crawl_time": result.get("crawl_time", 0),
-                "emails": [],
-                "social_links": [],
-                "career_pages": []
-            }
+            "emails": [],
+            "social_links": [],
+            "career_pages": []
+        }
+        
+        if result.get("success"):
+            response.successful_crawls += 1
             
-            if result.get("success"):
-                response.successful_crawls += 1
-                
-                # Process extracted data
-                data_for_extractor = []
-                
-                # Add emails
-                for email in result.get("emails", []):
-                    data_for_extractor.append({"label": "email", "value": email})
-                    all_emails.add(email)
-                
-                # Add URLs
-                for url_found in result.get("urls", []):
-                    data_for_extractor.append({"label": "url", "value": url_found})
-                
-                # Process with contact extractor
-                if data_for_extractor:
-                    classified_contacts = process_extracted_crawl_results(
-                        raw_extracted_list=data_for_extractor,
-                        base_url=result.get("url", url)
-                    )
-                    
-                    crawl_result["emails"] = classified_contacts.get("emails", [])
-                    crawl_result["social_links"] = classified_contacts.get("social_links", [])
-                    crawl_result["career_pages"] = classified_contacts.get("career_pages", [])
-                    
-                    # Add to global sets
-                    all_emails.update(classified_contacts.get("emails", []))
-                    all_social_links.update(classified_contacts.get("social_links", []))
-                    all_career_pages.update(classified_contacts.get("career_pages", []))
+            # Process extracted data
+            data_for_extractor = []
             
-            # Add career URLs found by improved method
-            career_urls = result.get("career_urls", [])
-            for career_url in career_urls:
-                if career_url not in crawl_result["career_pages"]:
-                    crawl_result["career_pages"].append(career_url)
-                if career_url not in all_career_pages:
-                    all_career_pages.add(career_url)
+            # Add emails
+            for email in result.get("emails", []):
+                data_for_extractor.append({"label": "email", "value": email})
+                all_emails.add(email)
             
-            response.crawl_results.append(crawl_result)
+            # Add URLs
+            for url_found in result.get("urls", []):
+                data_for_extractor.append({"label": "url", "value": url_found})
+            
+            # Process with contact extractor
+            if data_for_extractor:
+                classified_contacts = process_extracted_crawl_results(
+                    raw_extracted_list=data_for_extractor,
+                    base_url=result.get("url", url)
+                )
+                
+                crawl_result["emails"] = classified_contacts.get("emails", [])
+                crawl_result["social_links"] = classified_contacts.get("social_links", [])
+                crawl_result["career_pages"] = classified_contacts.get("career_pages", [])
+                
+                # Add to global sets
+                all_emails.update(classified_contacts.get("emails", []))
+                all_social_links.update(classified_contacts.get("social_links", []))
+                all_career_pages.update(classified_contacts.get("career_pages", []))
+        
+        # Add career URLs found by improved method
+        career_urls = result.get("career_urls", [])
+        for career_url in career_urls:
+            if career_url not in crawl_result["career_pages"]:
+                crawl_result["career_pages"].append(career_url)
+            if career_url not in all_career_pages:
+                all_career_pages.add(career_url)
+        
+        response.crawl_results.append(crawl_result)
     
     # Set final results
     response.emails = sorted(list(all_emails))
@@ -581,14 +704,23 @@ async def get_crawl_stats():
         "endpoints": {
             "single_crawl": "/crawl_and_extract_contact_info",
             "batch_crawl": "/batch_crawl_and_extract",
-            "stats": "/stats"
+            "test_career": "/test_career_extraction",
+            "extract_jobs_from_career": "/extract_jobs_from_career_pages",
+            "extract_jobs_from_urls": "/extract_jobs_from_urls",
+            "stats": "/stats",
+            "clear_cache": "/clear_cache"
         },
         "features": {
             "playwright_primary": True,
             "requests_fallback": True,
             "parallel_processing": True,
             "caching": True,
-            "vietnamese_optimized": True
+            "vietnamese_optimized": True,
+            "job_board_detection": True,
+            "career_page_extraction": True,
+            "enhanced_keywords": len(CAREER_KEYWORDS_VI),
+            "career_selectors": len(CAREER_SELECTORS),
+            "job_board_platforms": len(JOB_BOARD_DOMAINS)
         }
     }
 
@@ -603,6 +735,148 @@ async def clear_cache():
         "cleared_items": cache_size,
         "timestamp": datetime.now().isoformat()
     }
+
+@app.post("/test_career_extraction")
+async def test_career_extraction(request: CrawlRequest):
+    """Test endpoint specifically for career page extraction"""
+    logger.info(f"🧪 Testing career extraction for: {request.url}")
+    
+    result = await crawl_single_url(request.url)
+    
+    if result.get("success"):
+        career_urls = result.get("career_urls", [])
+        is_job_board = is_job_board_url(request.url)
+        
+        return {
+            "url": request.url,
+            "success": True,
+            "is_job_board": is_job_board,
+            "career_urls_found": len(career_urls),
+            "career_urls": career_urls,
+            "total_urls_found": len(result.get("urls", [])),
+            "crawl_method": result.get("method"),
+            "crawl_time": result.get("crawl_time")
+        }
+    else:
+        return {
+            "url": request.url,
+            "success": False,
+            "error_message": result.get("error_message")
+        }
+
+@app.post("/extract_jobs_from_career_pages")
+async def extract_jobs_from_career_pages(request: CrawlRequest):
+    """
+    Extract job listings from career pages
+    This endpoint will:
+    1. Crawl the given URL to find career pages
+    2. Extract job listings from those career pages
+    """
+    logger.info(f"💼 Extracting jobs from career pages: {request.url}")
+    
+    # First, crawl the URL to find career pages
+    crawl_result = await crawl_single_url(request.url)
+    
+    if not crawl_result.get("success"):
+        return {
+            "success": False,
+            "source_url": request.url,
+            "error": f"Crawl failed: {crawl_result.get('error_message')}",
+            "jobs": []
+        }
+    
+    # Get career pages found
+    career_urls = crawl_result.get("career_urls", [])
+    
+    if not career_urls:
+        return {
+            "success": False,
+            "source_url": request.url,
+            "error": "No career pages found",
+            "jobs": []
+        }
+    
+    logger.info(f"📋 Found {len(career_urls)} career pages, extracting jobs...")
+    
+    # Import job extractor
+    try:
+        from job_extractor import extract_jobs_from_multiple_pages
+    except ImportError:
+        return {
+            "success": False,
+            "source_url": request.url,
+            "error": "Job extractor module not available",
+            "jobs": []
+        }
+    
+    # Extract jobs from career pages
+    job_result = extract_jobs_from_multiple_pages(career_urls, max_jobs_per_page=20)
+    
+    # Add crawl info to result
+    job_result.update({
+        "source_url": request.url,
+        "career_pages_found": len(career_urls),
+        "career_pages": career_urls,
+        "crawl_method": crawl_result.get("method"),
+        "crawl_time": crawl_result.get("crawl_time")
+    })
+    
+    logger.info(f"✅ Job extraction completed: {job_result.get('total_jobs_found', 0)} jobs found")
+    
+    return job_result
+
+@app.post("/extract_jobs_from_urls")
+async def extract_jobs_from_urls(request: BatchCrawlRequest):
+    """
+    Extract job listings from a list of URLs
+    Useful when you already have career page URLs
+    """
+    logger.info(f"💼 Extracting jobs from URLs")
+    
+    # Get URLs from request
+    urls_to_process = []
+    
+    if request.career_page:
+        if isinstance(request.career_page, str):
+            urls_to_process = [url.strip() for url in request.career_page.split(',') if url.strip()]
+        else:
+            urls_to_process = request.career_page
+    
+    if request.url and not urls_to_process:
+        urls_to_process = [request.url]
+    
+    if not urls_to_process:
+        return {
+            "success": False,
+            "error": "No URLs provided",
+            "jobs": []
+        }
+    
+    logger.info(f"📋 Processing {len(urls_to_process)} URLs for job extraction...")
+    
+    # Import job extractor
+    try:
+        from job_extractor import extract_jobs_from_multiple_pages
+    except ImportError:
+        return {
+            "success": False,
+            "error": "Job extractor module not available",
+            "jobs": []
+        }
+    
+    # Extract jobs from URLs
+    job_result = extract_jobs_from_multiple_pages(urls_to_process, max_jobs_per_page=20)
+    
+    # Add request info to result
+    job_result.update({
+        "company_name": request.name,
+        "domain": request.domain,
+        "urls_processed": urls_to_process
+    })
+    
+    logger.info(f"✅ Job extraction completed: {job_result.get('total_jobs_found', 0)} jobs found")
+    
+    return job_result
 
 if __name__ == "__main__":
     import uvicorn

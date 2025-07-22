@@ -17,6 +17,67 @@ CAREER_KEYWORDS: Set[str] = {
     "apply now", "open roles", "we're hiring"
 }
 
+# Vietnamese career keywords for better detection
+CAREER_KEYWORDS_VI: Set[str] = {
+    # Vietnamese keywords (with and without accents, with and without spaces)
+    'tuyen-dung', 'tuyển-dụng', 'tuyendung', 'tuyendung',
+    'viec-lam', 'việc-làm', 'vieclam', 'vieclam',
+    'co-hoi', 'cơ-hội', 'cohoi', 'cohoi',
+    'nhan-vien', 'nhân-viên', 'nhanvien', 'nhanvien',
+    'tuyen', 'tuyển', 'tuyen', 'tuyen',
+    'ung-vien', 'ứng-viên', 'ungvien', 'ungvien',
+    'cong-viec', 'công-việc', 'congviec', 'congviec',
+    'lam-viec', 'làm-việc', 'lamviec', 'lamviec',
+    'moi', 'mời', 'moi', 'moi',
+    'thu-viec', 'thử-việc', 'thuviec', 'thuviec',
+    'chinh-thuc', 'chính-thức', 'chinhthuc', 'chinhthuc',
+    
+    # Additional Vietnamese keywords
+    'nghe-nghiep', 'nghề-nghiệp', 'nghenghiep', 'nghenghiep',
+    'co-hoi-nghe-nghiep', 'cơ-hội-nghề-nghiệp', 'cohoinghenghiep', 'cohoinghenghiep',
+    'tim-viec', 'tìm-việc', 'timviec', 'timviec',
+    'dang-tuyen', 'đang-tuyển', 'dangtuyen', 'dangtuyen',
+    'tuyen-dung-nhan-vien', 'tuyển-dụng-nhân-viên', 'tuyendungnhanvien', 'tuyendungnhanvien',
+    'tuyen-dung-developer', 'tuyển-dụng-developer', 'tuyendungdeveloper', 'tuyendungdeveloper',
+    'tuyen-dung-engineer', 'tuyển-dụng-engineer', 'tuyendungengineer', 'tuyendungengineer',
+    'tuyen-dung-analyst', 'tuyển-dụng-analyst', 'tuyendunganalyst', 'tuyendunganalyst',
+    'tuyen-dung-manager', 'tuyển-dụng-manager', 'tuyendungmanager', 'tuyendungmanager',
+    'tuyen-dung-designer', 'tuyển-dụng-designer', 'tuyendungdesigner', 'tuyendungdesigner',
+    'tuyen-dung-tester', 'tuyển-dụng-tester', 'tuyendungtester', 'tuyendungtester',
+    'tuyen-dung-qa', 'tuyển-dụng-qa', 'tuyendungqa', 'tuyendungqa',
+    'tuyen-dung-devops', 'tuyển-dụng-devops', 'tuyendungdevops', 'tuyendungdevops',
+    'tuyen-dung-data', 'tuyển-dụng-data', 'tuyendungdata', 'tuyendungdata',
+    'tuyen-dung-ai', 'tuyển-dụng-ai', 'tuyendungai', 'tuyendungai',
+    'tuyen-dung-ml', 'tuyển-dụng-ml', 'tuyendungml', 'tuyendungml',
+    'tuyen-dung-ui', 'tuyển-dụng-ui', 'tuyendungui', 'tuyendungui',
+    'tuyen-dung-ux', 'tuyển-dụng-ux', 'tuyendungux', 'tuyendungux',
+    'tuyen-dung-pm', 'tuyển-dụng-pm', 'tuyendungpm', 'tuyendungpm',
+    'tuyen-dung-ba', 'tuyển-dụng-ba', 'tuyendungba', 'tuyendungba',
+    'tuyen-dung-scrum', 'tuyển-dụng-scrum', 'tuyendungscrum', 'tuyendungscrum',
+    'tuyen-dung-agile', 'tuyển-dụng-agile', 'tuyendungagile', 'tuyendungagile',
+    
+    # English keywords (with and without hyphens)
+    'developer', 'dev', 'programmer', 'engineer',
+    'software', 'tech', 'technology', 'it',
+    'career', 'job', 'recruitment', 'employment',
+    'work', 'position', 'opportunity', 'vacancy',
+    'apply', 'application', 'hiring', 'join-us', 'joinus',
+    'team', 'talent', 'careers', 'jobs',
+    'open-role', 'open-roles', 'openrole', 'openroles',
+    'we-are-hiring', 'wearehiring', 'hiring', 'hiring',
+    'work-with-us', 'workwithus', 'join-our-team', 'joinourteam',
+    'grow-with-us', 'growwithus', 'build-with-us', 'buildwithus',
+    'create-with-us', 'createwithus', 'innovate-with-us', 'innovatewithus',
+    'full-time', 'fulltime', 'part-time', 'parttime',
+    'remote', 'hybrid', 'onsite', 'on-site', 'onsite',
+    'freelance', 'contract', 'internship', 'intern',
+    'graduate', 'entry-level', 'entrylevel', 'senior',
+    'junior', 'lead', 'principal', 'frontend', 'front-end', 'frontend',
+    'backend', 'back-end', 'backend', 'fullstack', 'full-stack', 'fullstack',
+    'mobile', 'web', 'data', 'ai', 'ml', 'machine-learning', 'machinelearning',
+    'devops', 'qa', 'test', 'testing', 'ui', 'ux', 'design', 'product'
+}
+
 # Helper functions
 
 def extract_valid_email(email_str: str) -> Optional[str]:
@@ -198,7 +259,11 @@ def process_extracted_crawl_results(
 
             # Check for career pages
             is_career_candidate = False
-            for keyword in CAREER_KEYWORDS:
+            
+            # Check both English and Vietnamese keywords
+            all_career_keywords = CAREER_KEYWORDS.union(CAREER_KEYWORDS_VI)
+            
+            for keyword in all_career_keywords:
                 # Check keyword in the path or query parameters
                 if keyword in path_lower or keyword in query_lower:
                     is_career_candidate = True
@@ -206,7 +271,13 @@ def process_extracted_crawl_results(
             
             if is_career_candidate:
                 # Add heuristic: check for common career path segments to reduce false positives
-                career_path_segments = ["career", "jobs", "hiring", "vacancy", "vacancies", "opportunity", "opportunities", "work-with-us", "join-us", "apply", "recruitment", "careers", "open-roles"]
+                career_path_segments = [
+                    "career", "jobs", "hiring", "vacancy", "vacancies", "opportunity", "opportunities", 
+                    "work-with-us", "join-us", "apply", "recruitment", "careers", "open-roles",
+                    "tuyen-dung", "tuyển-dụng", "viec-lam", "việc-làm", "co-hoi", "cơ-hội",
+                    "nhan-vien", "nhân-viên", "ung-vien", "ứng-viên", "cong-viec", "công-việc",
+                    "lam-viec", "làm-việc", "moi", "mời", "thu-viec", "thử-việc"
+                ]
                 path_and_query = f"{path_lower}?{query_lower}"
 
                 has_career_segment = False

@@ -47,6 +47,7 @@ RUN useradd -m -u 1000 appuser
 # Copy application code
 COPY crawl_endpoint.py .
 COPY contact_extractor.py .
+COPY job_extractor.py .
 
 # Change ownership to appuser
 RUN chown -R appuser:appuser /app
