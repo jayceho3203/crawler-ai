@@ -1,0 +1,374 @@
+{
+  "name": "Nhận career url - Simple",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "441864de-e1c2-4b17-b37c-3a83cf2ef09d"
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [380, 1580],
+      "id": "76e7906a-0fac-43d8-80de-877776e8ff7d",
+      "name": "Webhook2",
+      "webhookId": "441864de-e1c2-4b17-b37c-3a83cf2ef09d"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://crawler-ai.fly.dev/api/v1/crawl_and_extract_contact_info",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "url",
+              "value": "={{ $json.body.url_career }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 1580],
+      "id": "b3ceb8a4-0403-4362-9550-419ee68fc357",
+      "name": "Initial Career Crawl",
+      "alwaysOutputData": false,
+      "retryOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract company_id from webhook or use default\nconst company_id = $('Webhook2').item.json.body.company_id || 'default_company';\nconst career_page_url = $('Webhook2').item.json.body.url_career;\n\n// Check if initial crawl found jobs directly\nconst result = $input.first().json;\n\nif (result.success && result.total_jobs_found > 0) {\n  return {\n    has_jobs: true,\n    jobs: result.jobs || [],\n    source: 'direct_extraction',\n    career_page_url: career_page_url,\n    company_id: company_id,\n    workflow_completed: true\n  };\n} else {\n  // No jobs found, need to crawl child links\n  const career_pages = result.career_pages || [];\n  return {\n    has_jobs: false,\n    career_pages: career_pages,\n    source: 'need_child_crawling',\n    career_page_url: career_page_url,\n    company_id: company_id,\n    workflow_completed: false\n  };\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, 1580],
+      "id": "658f075f-bbfc-4e6e-a880-ddf1a9a62ec0",
+      "name": "Check Initial Result"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.has_jobs }}",
+              "operation": "equal",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1080, 1580],
+      "id": "10a42f6a-7483-4dd6-aa74-43249ae30e2e",
+      "name": "Has Jobs from Initial Crawl?"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Process jobs found from initial crawl\nconst jobs = $input.first().json.jobs;\nconst career_page_url = $input.first().json.career_page_url;\nconst company_id = $input.first().json.company_id;\n\nconst processed_jobs = jobs.map(job => ({\n  json: {\n    job_name: job.job_name || job.title || 'Unknown Job',\n    job_link: job.job_link || job.url || '',\n    job_description: job.job_description || job.description || '',\n    job_role: job.job_role || job.title || 'Unknown Role',\n    job_type: job.job_type || 'Full-time',\n    company_id: company_id,\n    source_url: career_page_url,\n    extraction_method: 'direct_crawl',\n    success: true\n  }\n}));\n\nreturn processed_jobs;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1280, 1460],
+      "id": "c50ce7df-dfef-4c99-8ee7-f2e4d48ad840",
+      "name": "Process Direct Jobs"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare career pages for child crawling\nconst career_pages = $input.first().json.career_pages;\nconst career_page_url = $input.first().json.career_page_url;\nconst company_id = $input.first().json.company_id;\n\nif (!Array.isArray(career_pages) || career_pages.length === 0) {\n  return [{\n    json: {\n      error: 'No career pages found',\n      source_url: career_page_url,\n      company_id: company_id,\n      workflow_completed: true,\n      success: false\n    }\n  }];\n}\n\nreturn career_pages.map(url => ({\n  json: {\n    career_page: url,\n    source_url: career_page_url,\n    company_id: company_id\n  }\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1280, 1700],
+      "id": "prepare-child-crawl",
+      "name": "Prepare Child Crawl"
+    },
+    {
+      "parameters": {
+        "batchSize": 1
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [1480, 1700],
+      "id": "ccfe6c06-fd27-49ff-a1c1-0ef0523e7bf0",
+      "name": "Loop Over Career Pages",
+      "executeOnce": false
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://crawler-ai.fly.dev/api/v1/crawl_child_links",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "career_page_url",
+              "value": "={{ $json.career_page }}"
+            },
+            {
+              "name": "max_links",
+              "value": "15"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1680, 1700],
+      "id": "6d65ccda-89a2-4b4d-add0-43f4d0653393",
+      "name": "Crawl Child Links",
+      "alwaysOutputData": false,
+      "retryOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.workflow_data.has_job_links }}",
+              "operation": "equal",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1880, 1700],
+      "id": "has-child-job-links",
+      "name": "Has Child Job Links?"
+    },
+    {
+      "parameters": {
+        "batchSize": 1
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [2080, 1580],
+      "id": "loop-job-links",
+      "name": "Loop Job Links",
+      "executeOnce": false
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.url }}",
+        "responseFormat": "string",
+        "timeout": 15000
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [2280, 1580],
+      "id": "get-job-detail",
+      "name": "Get Job Detail HTML"
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-2.0-flash-lite"
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [2480, 1700],
+      "id": "b08a88d1-7d84-48d3-9dc4-2cf6bd767baa",
+      "name": "Google Gemini Chat Model"
+    },
+    {
+      "parameters": {
+        "schemaType": "manual",
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"hasJob\": {\n      \"type\": \"boolean\"\n    },\n    \"confidence\": {\n      \"type\": \"number\"\n    },\n    \"job_name\": {\n      \"type\": \"string\"\n    },\n    \"job_link\": {\n      \"type\": \"string\"\n    },\n    \"job_description\": {\n      \"type\": \"string\"\n    },\n    \"job_role\": {\n      \"type\": \"string\"\n    },\n    \"job_type\": {\n      \"type\": \"string\"\n    },\n    \"reason\": {\n      \"type\": \"string\"\n    }\n  },\n  \"required\": [\"hasJob\", \"confidence\", \"reason\"],\n  \"additionalProperties\": false\n}\n"
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.2,
+      "position": [2680, 1700],
+      "id": "e7f7f2c2-8920-4e77-9440-04049f1ee59b",
+      "name": "Structured Output Parser"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "You are a job page detection AI. Analyze HTML content and determine if it contains a job posting.\n\nCRITICAL: Only return hasJob=true if you are confident this is an actual job posting.\n\nANALYSIS CRITERIA:\n- hasJob=true: Page contains specific job posting with title, description, requirements\n- hasJob=false: Page is about company, careers, team, or general information\n\nRED FLAGS (indicate hasJob=false):\n- Only mentions \"career\", \"join us\", \"team\" without specific job details\n- Company overview, about us, general information\n- Blog posts, news, articles\n- Contact forms, general applications\n- No specific job title or requirements\n\nJOB_TYPE MAPPING (only if hasJob=true):\n- \"Full-time\" (permanent, regular positions)\n- \"Part-time\" (temporary, reduced hours)\n- \"Internship\" (student, trainee positions)\n- \"Freelance\" (project-based, independent work)\n- \"Remote\" (work-from-home, virtual positions)\n- \"On-site\" (office-based, physical location required)\n- \"Hybrid\" (mixed remote/office work)\n- \"Contract\" (fixed-term, temporary contracts)\n\nHTML CONTENT:\n{{ $json.body }}\n\nReturn ONLY the JSON object with hasJob, confidence, reason, and job details if applicable.",
+        "hasOutputParser": true
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [2480, 1580],
+      "id": "678adea0-a602-4c20-8ebf-ac8bf4490781",
+      "name": "AI Job Detection & Extraction",
+      "alwaysOutputData": true,
+      "retryOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Validate AI response and handle errors\nconst ai_response = $input.first().json;\nconst current_url = $('Get Job Detail HTML').item.json.url;\nconst company_id = $('Loop Over Career Pages').item.json.company_id;\nconst source_url = $('Loop Over Career Pages').item.json.source_url;\n\n// Check if AI response is valid\nif (!ai_response || typeof ai_response.hasJob !== 'boolean') {\n  return {\n    json: {\n      error: 'Invalid AI response format',\n      current_url: current_url,\n      company_id: company_id,\n      source_url: source_url,\n      success: false,\n      continue_loop: true\n    }\n  };\n}\n\n// Check confidence threshold\nif (ai_response.confidence < 0.7) {\n  return {\n    json: {\n      error: 'Low confidence job detection',\n      confidence: ai_response.confidence,\n      reason: ai_response.reason,\n      current_url: current_url,\n      company_id: company_id,\n      source_url: source_url,\n      success: false,\n      continue_loop: true\n    }\n  };\n}\n\n// Process valid job detection\nif (ai_response.hasJob === true) {\n  return {\n    json: {\n      job_name: ai_response.job_name || 'Unknown Job',\n      job_link: ai_response.job_link || current_url,\n      job_description: ai_response.job_description || '',\n      job_role: ai_response.job_role || ai_response.job_name || 'Unknown Role',\n      job_type: ai_response.job_type || 'Full-time',\n      company_id: company_id,\n      source_url: source_url,\n      extraction_method: 'ai_detection',\n      confidence: ai_response.confidence,\n      reason: ai_response.reason,\n      success: true\n    }\n  };\n} else {\n  // No job found, continue to next link\n  return {\n    json: {\n      continue_loop: true,\n      job_found: false,\n      current_url: current_url,\n      company_id: company_id,\n      source_url: source_url,\n      reason: ai_response.reason,\n      success: true\n    }\n  };\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2880, 1580],
+      "id": "validate-ai-response",
+      "name": "Validate AI Response"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.success }}",
+              "operation": "equal",
+              "value2": true
+            },
+            {
+              "value1": "={{ $json.job_name }}",
+              "operation": "exists"
+            }
+          ],
+          "combineOperation": "and"
+        }
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [3080, 1580],
+      "id": "job-found-in-detail",
+      "name": "Valid Job Found?"
+    },
+    {
+      "parameters": {
+        "jsCode": "// No child job links found\nreturn {\n  json: {\n    error: 'No job links found in career page',\n    source_url: $('Loop Over Career Pages').item.json.source_url,\n    company_id: $('Loop Over Career Pages').item.json.company_id,\n    workflow_completed: true,\n    success: false\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2080, 1820],
+      "id": "no-child-job-links",
+      "name": "No Child Job Links"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api-55blff7khq-as.a.run.app/api/v1/companies/crawl/jobs",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "job_name",
+              "value": "={{ $json.job_name }}"
+            },
+            {
+              "name": "job_type",
+              "value": "={{ $json.job_type }}"
+            },
+            {
+              "name": "job_role",
+              "value": "={{ $json.job_role }}"
+            },
+            {
+              "name": "job_description",
+              "value": "={{ $json.job_description }}"
+            },
+            {
+              "name": "company_id",
+              "value": "={{ $json.company_id }}"
+            },
+            {
+              "name": "job_link",
+              "value": "={{ $json.job_link }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3280, 1460],
+      "id": "824c0103-702f-4941-b4ad-adb6a62418ae",
+      "name": "Save Job to API"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Aggregate all results for comprehensive logging\nconst all_results = $input.all();\nconst successful_jobs = all_results.filter(item => \n  item.json.success && item.json.job_name && item.json.job_name !== 'Unknown Job'\n);\nconst failed_extractions = all_results.filter(item => \n  item.json.error || (item.json.success === false)\n);\nconst skipped_pages = all_results.filter(item => \n  item.json.continue_loop && item.json.job_found === false\n);\n\nconst summary = {\n  workflow_name: 'Nhận career url - Simple',\n  timestamp: new Date().toISOString(),\n  total_processed: all_results.length,\n  successful_jobs: successful_jobs.length,\n  failed_extractions: failed_extractions.length,\n  skipped_pages: skipped_pages.length,\n  success_rate: all_results.length > 0 ? (successful_jobs.length / all_results.length * 100).toFixed(2) + '%' : '0%',\n  \n  // Detailed results\n  jobs: successful_jobs.map(item => ({\n    job_name: item.json.job_name,\n    job_role: item.json.job_role,\n    job_type: item.json.job_type,\n    company_id: item.json.company_id,\n    source_url: item.json.source_url,\n    extraction_method: item.json.extraction_method,\n    confidence: item.json.confidence || 'N/A'\n  })),\n  \n  errors: failed_extractions.map(item => ({\n    error: item.json.error,\n    source_url: item.json.source_url,\n    company_id: item.json.company_id,\n    reason: item.json.reason || 'N/A'\n  })),\n  \n  skipped: skipped_pages.map(item => ({\n    url: item.json.current_url,\n    reason: item.json.reason || 'No job detected',\n    company_id: item.json.company_id\n  })),\n  \n  workflow_completed: true,\n  version: '2.0-simple'\n};\n\n// Log comprehensive summary\nconsole.log('=== WORKFLOW SUMMARY ===');\nconsole.log(JSON.stringify(summary, null, 2));\nconsole.log('=== END SUMMARY ===');\n\nreturn summary;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3480, 1460],
+      "id": "aggregate-results",
+      "name": "Aggregate Results"
+    },
+    {
+      "parameters": {
+        "amount": 1,
+        "unit": "minutes"
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [1480, 1460],
+      "id": "61de972e-dc2a-471a-8bf1-34e618e5efc5",
+      "name": "Wait",
+      "webhookId": "e21ac816-f446-4a16-bf72-593fd24750c7"
+    }
+  ],
+  "connections": {
+    "Webhook2": {
+      "main": [[{"node": "Initial Career Crawl","type": "main","index": 0}]]
+    },
+    "Initial Career Crawl": {
+      "main": [[{"node": "Check Initial Result","type": "main","index": 0}]]
+    },
+    "Check Initial Result": {
+      "main": [[{"node": "Has Jobs from Initial Crawl?","type": "main","index": 0}]]
+    },
+    "Has Jobs from Initial Crawl?": {
+      "main": [
+        [{"node": "Process Direct Jobs","type": "main","index": 0}],
+        [{"node": "Prepare Child Crawl","type": "main","index": 0}]
+      ]
+    },
+    "Process Direct Jobs": {
+      "main": [[{"node": "Save Job to API","type": "main","index": 0}]]
+    },
+    "Prepare Child Crawl": {
+      "main": [[{"node": "Loop Over Career Pages","type": "main","index": 0}]]
+    },
+    "Loop Over Career Pages": {
+      "main": [
+        [{"node": "Wait","type": "main","index": 0}],
+        [{"node": "Crawl Child Links","type": "main","index": 0}]
+      ]
+    },
+    "Crawl Child Links": {
+      "main": [[{"node": "Has Child Job Links?","type": "main","index": 0}]]
+    },
+    "Has Child Job Links?": {
+      "main": [
+        [{"node": "Loop Job Links","type": "main","index": 0}],
+        [{"node": "No Child Job Links","type": "main","index": 0}]
+      ]
+    },
+    "Loop Job Links": {
+      "main": [[{"node": "Get Job Detail HTML","type": "main","index": 0}]]
+    },
+    "Get Job Detail HTML": {
+      "main": [[{"node": "AI Job Detection & Extraction","type": "main","index": 0}]]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [[{"node": "AI Job Detection & Extraction","type": "ai_languageModel","index": 0}]]
+    },
+    "Structured Output Parser": {
+      "ai_outputParser": [[{"node": "AI Job Detection & Extraction","type": "ai_outputParser","index": 0}]]
+    },
+    "AI Job Detection & Extraction": {
+      "main": [[{"node": "Validate AI Response","type": "main","index": 0}]]
+    },
+    "Validate AI Response": {
+      "main": [[{"node": "Valid Job Found?","type": "main","index": 0}]]
+    },
+    "Valid Job Found?": {
+      "main": [
+        [{"node": "Save Job to API","type": "main","index": 0}],
+        [{"node": "Aggregate Results","type": "main","index": 0}]
+      ]
+    },
+    "Save Job to API": {
+      "main": [[{"node": "Aggregate Results","type": "main","index": 0}]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+} 

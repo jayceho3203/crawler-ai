@@ -25,7 +25,7 @@ primary_region = 'sin'
     timeout = '15s'
     grace_period = '30s'
     method = 'GET'
-    path = '/stats'
+    path = '/api/v1/stats'
 
 [[vm]]
   memory = '1gb'

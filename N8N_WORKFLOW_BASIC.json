@@ -1,0 +1,58 @@
+{
+  "name": "Basic Career Crawl",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "test-webhook"
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [380, 1580],
+      "id": "webhook-1",
+      "name": "Webhook"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://crawler-ai.fly.dev/api/v1/crawl_and_extract_contact_info",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "url",
+              "value": "={{ $json.body.url_career }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 1580],
+      "id": "http-1",
+      "name": "Crawl Career Page"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Simple response processing\nconst result = $input.first().json;\nreturn {\n  json: {\n    success: result.success || false,\n    total_jobs: result.total_jobs_found || 0,\n    career_pages: result.career_pages || [],\n    message: 'Career page processed successfully'\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, 1580],
+      "id": "code-1",
+      "name": "Process Result"
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [[{"node": "Crawl Career Page","type": "main","index": 0}]]
+    },
+    "Crawl Career Page": {
+      "main": [[{"node": "Process Result","type": "main","index": 0}]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+} 
