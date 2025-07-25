@@ -21,6 +21,7 @@ from .career_detector import (
 )
 from .job_extractor import extract_job_links_detailed, calculate_job_link_score
 from .hidden_job_extractor import HiddenJobExtractor
+from .simple_job_formatter import SimpleJobFormatter
 from ..utils.constants import (
     CAREER_SELECTORS, DEFAULT_TIMEOUT, DEFAULT_USER_AGENT, DEFAULT_HEADERS,
     JOB_LINK_SELECTORS, CAREER_SCORE_THRESHOLD, JOB_LINK_SCORE_THRESHOLD
@@ -182,6 +183,11 @@ async def extract_with_playwright(url: str) -> Dict:
             logger.info(f"👁️ Visible Jobs: {len(visible_jobs)} extracted")
             logger.info(f"📋 Total Unique Jobs: {len(unique_jobs)}")
             
+            # Format jobs using simple formatter
+            formatter = SimpleJobFormatter()
+            formatted_jobs = formatter.format_jobs_list(unique_jobs)
+            job_summary = formatter.get_job_summary(unique_jobs)
+            
             return {
                 "success": True,
                 "status_code": response.status if response else 200,
@@ -197,6 +203,8 @@ async def extract_with_playwright(url: str) -> Dict:
                 "hidden_jobs": hidden_jobs,
                 "visible_jobs": visible_jobs,
                 "total_jobs": unique_jobs,
+                "formatted_jobs": formatted_jobs,
+                "job_summary": job_summary,
                 "crawl_time": crawl_time,
                 "method": "playwright"
             }
@@ -459,6 +467,11 @@ def extract_with_requests(url: str) -> Dict:
         logger.info(f"📊 Job Links: {len(job_links_detailed)} detected -> {len(job_links_filtered)} filtered")
         logger.info(f"👁️ Visible Jobs: {len(visible_jobs)} extracted")
         
+        # Format jobs using simple formatter
+        formatter = SimpleJobFormatter()
+        formatted_jobs = formatter.format_jobs_list(visible_jobs)
+        job_summary = formatter.get_job_summary(visible_jobs)
+        
         return {
             "success": True,
             "status_code": response.status_code,
@@ -474,6 +487,8 @@ def extract_with_requests(url: str) -> Dict:
             "hidden_jobs": [],  # No hidden jobs with requests method
             "visible_jobs": visible_jobs,
             "total_jobs": visible_jobs,
+            "formatted_jobs": formatted_jobs,
+            "job_summary": job_summary,
             "crawl_time": crawl_time,
             "method": "requests"
         }
