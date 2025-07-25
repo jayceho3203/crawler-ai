@@ -186,9 +186,11 @@ async def extract_with_playwright(url: str) -> Dict:
             # Format jobs using simple formatter
             try:
                 formatter = SimpleJobFormatter()
-                logger.info(f"🔧 Formatting {len(unique_jobs)} jobs...")
-                formatted_jobs = formatter.format_jobs_list(unique_jobs)
-                job_summary = formatter.get_job_summary(unique_jobs)
+                # Use total_jobs instead of unique_jobs for better data
+                jobs_to_format = unique_jobs if unique_jobs else []
+                logger.info(f"🔧 Formatting {len(jobs_to_format)} jobs...")
+                formatted_jobs = formatter.format_jobs_list(jobs_to_format)
+                job_summary = formatter.get_job_summary(jobs_to_format)
                 logger.info(f"✅ Jobs formatted successfully: {formatted_jobs.get('total_count', 0)} jobs")
             except Exception as e:
                 logger.error(f"❌ Error formatting jobs: {str(e)}")
