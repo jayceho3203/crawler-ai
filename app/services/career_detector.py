@@ -10,7 +10,7 @@ from typing import List, Dict, Tuple
 from bs4 import BeautifulSoup
 from ..utils.constants import (
     CAREER_KEYWORDS_VI, JOB_BOARD_DOMAINS, CAREER_SELECTORS,
-    STRONG_NON_CAREER_INDICATORS, CAREER_EXACT_PATTERNS
+    STRONG_NON_CAREER_INDICATORS, CAREER_EXACT_PATTERNS, REJECTED_NON_CAREER_PATHS
 )
 
 def is_job_board_url(url: str) -> bool:
@@ -96,14 +96,7 @@ def check_early_rejection(url: str, url_analysis: Dict) -> Tuple[bool, str]:
         return True, f"Path too deep: {url_analysis['path_depth']} levels"
     
     # 6. Specific non-career path patterns
-    non_career_paths = [
-        '/admin', '/login', '/register', '/signup', '/signin',
-        '/dashboard', '/profile', '/settings', '/account',
-        '/cart', '/checkout', '/payment', '/order',
-        '/search', '/filter', '/sort', '/category',
-        '/tag', '/author', '/user', '/member'
-    ]
-    for pattern in non_career_paths:
+    for pattern in REJECTED_NON_CAREER_PATHS:
         if pattern in path_lower:
             return True, f"Contains non-career path: {pattern}"
     

@@ -267,10 +267,13 @@ REJECTED_ID_PATTERNS = [
 
 # Non-career path patterns to reject
 REJECTED_NON_CAREER_PATHS = [
-    '/admin', '/login', '/register', '/signup', '/signin',
-    '/dashboard', '/profile', '/settings', '/account',
-    '/cart', '/checkout', '/payment', '/order',
-    '/search', '/filter', '/sort', '/category',
-    '/tag', '/author', '/user', '/member',
-    '/page', '/item', '/detail', '/view', '/show'
+    '/services/', '/service/', '/solutions/', '/solution/',
+    '/products/', '/product/', '/industries/', '/industry/',
+    '/about/', '/contact/', '/blog/', '/news/', '/article/',
+    '/admin/', '/login/', '/register/', '/signup/', '/signin/',
+    '/cart/', '/checkout/', '/payment/', '/order/', '/purchase/',
+    '/search/', '/filter/', '/sort/', '/category/', '/tag/',
+    '/author/', '/user/', '/profile/', '/account/', '/settings/',
+    '/panel/', '/control/', '/manage/', '/edit/', '/delete/', '/create/',
+    '/dashboard', '/member', '/page', '/item', '/detail', '/view', '/show'
 ] 
