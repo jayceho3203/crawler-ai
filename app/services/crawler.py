@@ -184,9 +184,16 @@ async def extract_with_playwright(url: str) -> Dict:
             logger.info(f"📋 Total Unique Jobs: {len(unique_jobs)}")
             
             # Format jobs using simple formatter
-            formatter = SimpleJobFormatter()
-            formatted_jobs = formatter.format_jobs_list(unique_jobs)
-            job_summary = formatter.get_job_summary(unique_jobs)
+            try:
+                formatter = SimpleJobFormatter()
+                logger.info(f"🔧 Formatting {len(unique_jobs)} jobs...")
+                formatted_jobs = formatter.format_jobs_list(unique_jobs)
+                job_summary = formatter.get_job_summary(unique_jobs)
+                logger.info(f"✅ Jobs formatted successfully: {formatted_jobs.get('total_count', 0)} jobs")
+            except Exception as e:
+                logger.error(f"❌ Error formatting jobs: {str(e)}")
+                formatted_jobs = {"jobs": [], "total_count": 0}
+                job_summary = {"total_jobs": 0, "job_types": {}, "locations": {}}
             
             return {
                 "success": True,
@@ -468,9 +475,16 @@ def extract_with_requests(url: str) -> Dict:
         logger.info(f"👁️ Visible Jobs: {len(visible_jobs)} extracted")
         
         # Format jobs using simple formatter
-        formatter = SimpleJobFormatter()
-        formatted_jobs = formatter.format_jobs_list(visible_jobs)
-        job_summary = formatter.get_job_summary(visible_jobs)
+        try:
+            formatter = SimpleJobFormatter()
+            logger.info(f"🔧 Formatting {len(visible_jobs)} jobs...")
+            formatted_jobs = formatter.format_jobs_list(visible_jobs)
+            job_summary = formatter.get_job_summary(visible_jobs)
+            logger.info(f"✅ Jobs formatted successfully: {formatted_jobs.get('total_count', 0)} jobs")
+        except Exception as e:
+            logger.error(f"❌ Error formatting jobs: {str(e)}")
+            formatted_jobs = {"jobs": [], "total_count": 0}
+            job_summary = {"total_jobs": 0, "job_types": {}, "locations": {}}
         
         return {
             "success": True,
