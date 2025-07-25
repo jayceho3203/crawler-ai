@@ -9,7 +9,7 @@ from urllib.parse import urlparse, urljoin, unquote
 from typing import List, Dict, Set, Optional
 
 # Import constants from the main constants file
-from .constants import CAREER_KEYWORDS_VI, CAREER_EXACT_PATTERNS
+from .constants import CAREER_KEYWORDS_VI, CAREER_EXACT_PATTERNS, REJECTED_NON_CAREER_PATHS
 
 # Social media domains
 SOCIAL_DOMAINS: Set[str] = {
@@ -215,21 +215,28 @@ def process_extracted_crawl_results(
             if any(social_domain in url_domain for social_domain in SOCIAL_DOMAINS):
                 social_links.add(normalized_url)
             
-            # Check if it's a career page
+            # Check if it's a career page with strict filtering
             url_lower = normalized_url.lower()
             is_career = False
             
-            # Check for career keywords in URL
-            for keyword in CAREER_KEYWORDS_VI:
-                if keyword in url_lower:
-                    is_career = True
-                    break
-            
-            # Check for career path patterns
-            for pattern in CAREER_EXACT_PATTERNS:
+            # First, check for non-career patterns (reject early)
+            for pattern in REJECTED_NON_CAREER_PATHS:
                 if pattern in url_lower:
-                    is_career = True
+                    is_career = False
                     break
+            else:
+                # Only check for career patterns if not rejected
+                # Check for career keywords in URL
+                for keyword in CAREER_KEYWORDS_VI:
+                    if keyword in url_lower:
+                        is_career = True
+                        break
+                
+                # Check for career path patterns
+                for pattern in CAREER_EXACT_PATTERNS:
+                    if pattern in url_lower:
+                        is_career = True
+                        break
             
             if is_career:
                 career_pages.add(normalized_url)
