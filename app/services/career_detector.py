@@ -92,8 +92,24 @@ def check_early_rejection(url: str, url_analysis: Dict) -> Tuple[bool, str]:
             return True, f"Contains file extension: {ext}"
     
     # 5. Very deep paths (unlikely to be main career pages)
-    if url_analysis['path_depth'] > 5:
+    if url_analysis['path_depth'] > 3:  # Reduced from 5 to 3
         return True, f"Path too deep: {url_analysis['path_depth']} levels"
+    
+    # 6. Job detail pages (should not be considered as career listing pages)
+    if url_analysis['path_depth'] > 1:
+        # Check if it looks like a job detail page
+        path_lower = url_analysis['path']
+        job_detail_indicators = [
+            '/hn---', '/hcm---', '/hanoi---', '/ho-chi-minh---',
+            '/senior-', '/junior-', '/lead-', '/principal-',
+            '/developer', '/engineer', '/analyst', '/manager',
+            '/designer', '/tester', '/qa-', '/devops-',
+            '/frontend-', '/backend-', '/fullstack-', '/mobile-',
+            '/web-', '/data-', '/ai-', '/ml-', '/ui-', '/ux-'
+        ]
+        for indicator in job_detail_indicators:
+            if indicator in path_lower:
+                return True, f"Looks like job detail page: {indicator}"
     
     # 6. Specific non-career path patterns
     for pattern in REJECTED_NON_CAREER_PATHS:

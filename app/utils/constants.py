@@ -173,7 +173,7 @@ STRONG_NON_JOB_INDICATORS = [
     'admin', 'panel', 'control', 'manage', 'edit', 'delete', 'create'
 ]
 
-# Career exact path patterns
+# Career exact path patterns (ONLY career listing pages, not job detail pages)
 CAREER_EXACT_PATTERNS = [
     '/tuyen-dung', '/tuyển-dụng', '/tuyendung',
     '/viec-lam', '/việc-làm', '/vieclam',
@@ -189,24 +189,6 @@ CAREER_EXACT_PATTERNS = [
     '/co-hoi-nghe-nghiep', '/cơ-hội-nghề-nghiệp', '/cohoinghenghiep',
     '/tim-viec', '/tìm-việc', '/timviec',
     '/dang-tuyen', '/đang-tuyển', '/dangtuyen',
-    '/tuyen-dung-nhan-vien', '/tuyển-dụng-nhân-viên', '/tuyendungnhanvien',
-    '/tuyen-dung-developer', '/tuyển-dụng-developer', '/tuyendungdeveloper',
-    '/tuyen-dung-engineer', '/tuyển-dụng-engineer', '/tuyendungengineer',
-    '/tuyen-dung-analyst', '/tuyển-dụng-analyst', '/tuyendunganalyst',
-    '/tuyen-dung-manager', '/tuyển-dụng-manager', '/tuyendungmanager',
-    '/tuyen-dung-designer', '/tuyển-dụng-designer', '/tuyendungdesigner',
-    '/tuyen-dung-tester', '/tuyển-dụng-tester', '/tuyendungtester',
-    '/tuyen-dung-qa', '/tuyển-dụng-qa', '/tuyendungqa',
-    '/tuyen-dung-devops', '/tuyển-dụng-devops', '/tuyendungdevops',
-    '/tuyen-dung-data', '/tuyển-dụng-data', '/tuyendungdata',
-    '/tuyen-dung-ai', '/tuyển-dụng-ai', '/tuyendungai',
-    '/tuyen-dung-ml', '/tuyển-dụng-ml', '/tuyendungml',
-    '/tuyen-dung-ui', '/tuyển-dụng-ui', '/tuyendungui',
-    '/tuyen-dung-ux', '/tuyển-dụng-ux', '/tuyendungux',
-    '/tuyen-dung-pm', '/tuyển-dụng-pm', '/tuyendungpm',
-    '/tuyen-dung-ba', '/tuyển-dụng-ba', '/tuyendungba',
-    '/tuyen-dung-scrum', '/tuyển-dụng-scrum', '/tuyendungscrum',
-    '/tuyen-dung-agile', '/tuyển-dụng-agile', '/tuyendungagile',
     '/career', '/careers', '/job', '/jobs', '/hiring', '/recruitment',
     '/employment', '/vacancy', '/vacancies', '/opportunity', '/opportunities',
     '/position', '/positions', '/apply', '/application', '/applications',
