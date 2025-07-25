@@ -39,6 +39,9 @@ class CrawlResponse(BaseModel):
     # Job extraction fields
     total_jobs_found: Optional[int] = None
     jobs: Optional[List[Dict]] = None
+    # Simple job formatting fields
+    formatted_jobs: Optional[Dict] = None
+    job_summary: Optional[Dict] = None
 
 class BatchCrawlResponse(BaseModel):
     """Response model for batch crawling results"""
