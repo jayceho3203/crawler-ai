@@ -219,6 +219,10 @@ def process_extracted_crawl_results(
             url_lower = normalized_url.lower()
             is_career = False
             
+            # Reject non-HTTP URLs (mailto, tel, javascript, etc.)
+            if not normalized_url.startswith(('http://', 'https://')):
+                continue
+            
             # First, check for non-career patterns (reject early)
             for pattern in REJECTED_NON_CAREER_PATHS:
                 if pattern in url_lower:
