@@ -2,11 +2,12 @@
 
 ## 🎯 Overview
 
-Đã tách endpoint `crawl_and_extract_contact_info` thành **3 endpoint riêng biệt** với các tính năng nâng cao:
+Đã tách endpoint `crawl_and_extract_contact_info` thành **4 endpoint riêng biệt** với các tính năng nâng cao:
 
 1. **`/extract_contact_info`** - Contact extraction với deep crawl
 2. **`/detect_career_pages`** - Career page detection với subdomain search
 3. **`/extract_jobs`** - Job extraction với advanced filtering
+4. **`/find_jobs_advanced`** - Advanced job finding với multiple strategies
 
 ## 📋 API Endpoints
 
@@ -155,6 +156,77 @@
 - ✅ Enhanced job details extraction
 - ✅ Per-page results and statistics
 
+### 4. Advanced Job Finding
+
+**Endpoint:** `POST /api/v1/find_jobs_advanced`
+
+**Request:**
+```json
+{
+  "career_url": "https://example.com/career",
+  "max_jobs": 100,
+  "search_strategy": "comprehensive",
+  "include_detailed_analysis": true,
+  "quality_threshold": 0.5
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "career_url": "https://example.com/career",
+  "crawl_time": 15.67,
+  "total_jobs_found": 25,
+  "high_quality_jobs": 18,
+  "average_quality_score": 0.72,
+  "jobs": [
+    {
+      "title": "Senior Developer",
+      "company": "Example Corp",
+      "location": "Hanoi",
+      "job_type": "full-time",
+      "salary": "25,000,000 VND",
+      "posted_date": "2024-01-15",
+      "job_link": "https://example.com/career/senior-developer",
+      "description": "We are looking for a senior developer...",
+      "quality_score": 0.85,
+      "rank": 1,
+      "analysis": {
+        "completeness_score": 0.9,
+        "relevance_score": 0.8,
+        "freshness_score": 0.7
+      }
+    }
+  ],
+  "statistics": {
+    "job_types": {"full-time": 15, "part-time": 10},
+    "locations": {"Hanoi": 12, "Ho Chi Minh": 13},
+    "quality_distribution": {
+      "excellent": 8,
+      "good": 10,
+      "fair": 5,
+      "poor": 2
+    }
+  },
+  "search_methods_used": [
+    "basic_extraction",
+    "hidden_job_extraction",
+    "pattern_based_search",
+    "deep_link_discovery"
+  ]
+}
+```
+
+**Enhanced Features:**
+- ✅ **Multiple search strategies**: comprehensive, pattern-based, deep crawl
+- ✅ **Quality scoring**: Rank jobs by quality score
+- ✅ **Advanced analysis**: Detailed job analysis with completeness, relevance, freshness
+- ✅ **Multiple extraction methods**: Basic, hidden, pattern-based, deep link discovery
+- ✅ **Quality filtering**: Filter by quality threshold
+- ✅ **Comprehensive statistics**: Job types, locations, quality distribution
+- ✅ **Search method tracking**: Know which methods found which jobs
+
 ## 🔄 Complete Workflow
 
 **Step-by-step workflow using separated endpoints:**
@@ -171,6 +243,12 @@ if career_result['career_pages']:
     job_result = await job_extraction_service.extract_jobs(
         career_result['career_pages']
     )
+
+# 4. Advanced job finding (alternative to step 3)
+if career_result['career_pages']:
+    advanced_result = await advanced_job_finder.find_jobs_advanced(
+        career_result['career_pages'][0]  # Use first career page
+    )
 ```
 
 ## 🚀 Benefits
@@ -184,6 +262,7 @@ if career_result['career_pages']:
 - **Selective extraction** - Choose what to extract
 - **Custom filtering** - Advanced job filtering options
 - **Configurable depth** - Control crawl depth and scope
+- **Quality control** - Filter jobs by quality score
 
 ### Maintainability
 - **Modular design** - Each service is independent
@@ -194,17 +273,20 @@ if career_result['career_pages']:
 - **Better contact extraction** - Deep crawl, phone detection
 - **Smarter career detection** - Subdomain search, confidence scoring
 - **Advanced job filtering** - Multiple filter types, hidden job extraction
+- **Advanced job finding** - Multiple strategies, quality scoring, detailed analysis
 
 ## 📊 Comparison
 
-| Feature | Original Endpoint | Separated Endpoints |
-|---------|------------------|-------------------|
-| Response Time | 15-30s | 5-10s each |
-| Memory Usage | High | Optimized |
-| Error Handling | Basic | Detailed |
-| Filtering | Limited | Advanced |
-| Statistics | Basic | Comprehensive |
-| Flexibility | Low | High |
+| Feature | Original Endpoint | Separated Endpoints | Advanced Job Finding |
+|---------|------------------|-------------------|---------------------|
+| Response Time | 15-30s | 5-10s each | 10-20s |
+| Memory Usage | High | Optimized | Optimized |
+| Error Handling | Basic | Detailed | Comprehensive |
+| Filtering | Limited | Advanced | Advanced + Quality |
+| Statistics | Basic | Comprehensive | Comprehensive |
+| Flexibility | Low | High | Very High |
+| Job Quality | Basic | Good | Excellent |
+| Search Methods | Single | Multiple | Multiple + Ranking |
 
 ## 🔧 Usage Examples
 
@@ -238,6 +320,18 @@ curl -X POST "https://crawler-ai.fly.dev/api/v1/extract_jobs" \
   }'
 ```
 
+### Advanced Job Finding
+```bash
+curl -X POST "https://crawler-ai.fly.dev/api/v1/find_jobs_advanced" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "career_url": "https://example.com/career",
+    "max_jobs": 100,
+    "search_strategy": "comprehensive",
+    "quality_threshold": 0.6
+  }'
+```
+
 ## 🔄 Backward Compatibility
 
 Endpoint gốc `/crawl_and_extract_contact_info` vẫn được giữ lại để đảm bảo tương thích với n8n workflow hiện tại.
@@ -247,7 +341,7 @@ Endpoint gốc `/crawl_and_extract_contact_info` vẫn được giữ lại đ�
 Chạy test script để kiểm tra các endpoint mới:
 
 ```bash
-python test_separated_endpoints.py
+python test_advanced_job_finder.py
 ```
 
 ## 📈 Performance Tips
@@ -255,4 +349,6 @@ python test_separated_endpoints.py
 1. **Use specific endpoints** - Chỉ gọi endpoint cần thiết
 2. **Configure filters** - Sử dụng filters để giảm thời gian xử lý
 3. **Limit depth** - Điều chỉnh max_depth phù hợp
-4. **Parallel requests** - Gọi các endpoint song song khi có thể 
+4. **Parallel requests** - Gọi các endpoint song song khi có thể
+5. **Quality threshold** - Sử dụng quality_threshold để lọc job chất lượng cao
+6. **Search strategy** - Chọn search strategy phù hợp với website 
