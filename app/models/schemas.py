@@ -43,6 +43,89 @@ class CrawlResponse(BaseModel):
     formatted_jobs: Optional[Dict] = None
     job_summary: Optional[Dict] = None
 
+# New schemas for separated endpoints
+class ContactInfoRequest(BaseModel):
+    """Request model for contact info extraction"""
+    url: str
+    include_social: bool = True
+    include_emails: bool = True
+    include_phones: bool = True
+    max_depth: int = 2
+    timeout: int = 30
+
+class ContactInfoResponse(BaseModel):
+    """Response model for contact info extraction"""
+    requested_url: str
+    success: bool
+    error_message: Optional[str] = None
+    crawl_time: Optional[float] = None
+    crawl_method: Optional[str] = None
+    # Contact data
+    emails: List[str] = []
+    phones: List[str] = []
+    social_links: List[str] = []
+    contact_forms: List[str] = []
+    # Raw data for debugging
+    raw_extracted_data: Optional[Dict] = None
+    # Statistics
+    total_pages_crawled: int = 0
+    total_links_found: int = 0
+
+class CareerPagesRequest(BaseModel):
+    """Request model for career page detection"""
+    url: str
+    include_subdomain_search: bool = True
+    max_pages_to_scan: int = 50
+    strict_filtering: bool = True
+    include_job_boards: bool = False
+
+class CareerPagesResponse(BaseModel):
+    """Response model for career page detection"""
+    requested_url: str
+    success: bool
+    error_message: Optional[str] = None
+    crawl_time: Optional[float] = None
+    # Career pages found
+    career_pages: List[str] = []
+    potential_career_pages: List[str] = []
+    rejected_urls: List[Dict] = []  # URLs that were rejected with reasons
+    # Analysis results
+    career_page_analysis: List[Dict] = []  # Detailed analysis of each career page
+    # Statistics
+    total_urls_scanned: int = 0
+    valid_career_pages: int = 0
+    confidence_score: float = 0.0
+
+class JobExtractionRequest(BaseModel):
+    """Request model for job extraction"""
+    career_page_urls: List[str]
+    max_jobs_per_page: int = 50
+    include_hidden_jobs: bool = True
+    include_job_details: bool = True
+    job_types_filter: Optional[List[str]] = None  # Filter by job types
+    location_filter: Optional[List[str]] = None   # Filter by locations
+    salary_range: Optional[Dict] = None  # min/max salary
+    posted_date_filter: Optional[str] = None  # "last_week", "last_month", etc.
+
+class JobExtractionResponse(BaseModel):
+    """Response model for job extraction"""
+    requested_urls: List[str]
+    success: bool
+    error_message: Optional[str] = None
+    crawl_time: Optional[float] = None
+    # Job data
+    total_jobs_found: int = 0
+    jobs: List[Dict] = []
+    formatted_jobs: Dict = {}  # Simple format for n8n
+    job_summary: Dict = {}     # Statistics
+    # Detailed analysis
+    job_analysis: List[Dict] = []  # Detailed analysis of each job
+    # Per-page results
+    page_results: List[Dict] = []  # Results for each career page
+    # Hidden jobs found
+    hidden_jobs_count: int = 0
+    visible_jobs_count: int = 0
+
 class BatchCrawlResponse(BaseModel):
     """Response model for batch crawling results"""
     company_name: Optional[str] = None
