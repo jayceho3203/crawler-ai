@@ -126,6 +126,31 @@ class JobExtractionResponse(BaseModel):
     hidden_jobs_count: int = 0
     visible_jobs_count: int = 0
 
+# New schema for advanced job finding
+class AdvancedJobFindingRequest(BaseModel):
+    """Request model for advanced job finding"""
+    career_url: str
+    max_jobs: int = 100
+    search_strategy: str = "comprehensive"  # "comprehensive", "deep_crawl", "pattern_based"
+    include_detailed_analysis: bool = True
+    quality_threshold: float = 0.5  # Minimum quality score to include
+
+class AdvancedJobFindingResponse(BaseModel):
+    """Response model for advanced job finding"""
+    career_url: str
+    success: bool
+    error_message: Optional[str] = None
+    crawl_time: Optional[float] = None
+    # Job data
+    total_jobs_found: int = 0
+    high_quality_jobs: int = 0
+    average_quality_score: float = 0.0
+    jobs: List[Dict] = []
+    # Statistics
+    statistics: Dict = {}
+    # Search methods used
+    search_methods_used: List[str] = []
+
 class BatchCrawlResponse(BaseModel):
     """Response model for batch crawling results"""
     company_name: Optional[str] = None
