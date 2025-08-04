@@ -12,6 +12,7 @@ from datetime import datetime
 from ..utils.constants import CAREER_KEYWORDS_VI, CAREER_SELECTORS, JOB_BOARD_DOMAINS
 from ..services.career_detector import filter_career_urls
 from .crawler import crawl_single_url
+from .scrapy_career_spider import run_optimized_career_spider
 
 logger = logging.getLogger(__name__)
 
@@ -30,9 +31,9 @@ class CareerPagesService:
             'indeed.com', 'linkedin.com/jobs', 'glassdoor.com'
         ]
     
-    async def detect_career_pages(self, url: str, include_subdomain_search: bool = True,
-                                max_pages_to_scan: int = 50, strict_filtering: bool = True,
-                                include_job_boards: bool = False) -> Dict:
+    async def detect_career_pages(self, url: str, include_subdomain_search: bool = False,
+                                max_pages_to_scan: int = 20, strict_filtering: bool = True,
+                                include_job_boards: bool = False, use_scrapy: bool = True) -> Dict:
         """
         Detect career pages with enhanced capabilities
         """
@@ -40,6 +41,14 @@ class CareerPagesService:
         
         try:
             logger.info(f"🔍 Starting career page detection for: {url}")
+            
+            # Use Scrapy if enabled (default)
+            if use_scrapy:
+                logger.info("🚀 Using optimized Scrapy spider")
+                return await self._detect_career_pages_scrapy(url, max_pages_to_scan)
+            
+            # Fallback to original method
+            logger.info("🔄 Using original crawling method")
             
             # Step 1: Crawl the main page
             result = await crawl_single_url(url)
@@ -386,6 +395,76 @@ class CareerPagesService:
                 'error': str(e)
             }
     
+    async def _detect_career_pages_scrapy(self, url: str, max_pages: int) -> Dict:
+        """
+        Detect career pages using optimized Scrapy spider
+        """
+        start_time = datetime.now()
+        
+        try:
+            logger.info(f"🚀 Running optimized Scrapy spider for: {url}")
+            
+            # Run Scrapy spider
+            result = await run_optimized_career_spider(url, max_pages)
+            
+            if not result.get('success', False):
+                return {
+                    'success': False,
+                    'error_message': result.get('error_message', 'Scrapy spider failed'),
+                    'requested_url': url,
+                    'crawl_time': (datetime.now() - start_time).total_seconds(),
+                    'crawl_method': 'scrapy_optimized'
+                }
+            
+            # Format result to match API response
+            career_pages = [page['url'] for page in result.get('career_pages', [])]
+            potential_career_pages = []
+            rejected_urls = []
+            
+            # Create career page analysis
+            career_page_analysis = []
+            for page in result.get('career_pages', []):
+                analysis = {
+                    'url': page['url'],
+                    'is_career_page': True,
+                    'is_potential': False,
+                    'confidence': page.get('confidence', 0.0),
+                    'rejection_reason': None,
+                    'indicators': page.get('indicators', [])
+                }
+                career_page_analysis.append(analysis)
+            
+            # Calculate confidence score
+            confidence_score = self._calculate_confidence_score(
+                len(career_pages), 
+                len(potential_career_pages), 
+                result.get('total_pages_crawled', 0)
+            )
+            
+            return {
+                'success': True,
+                'requested_url': url,
+                'career_pages': career_pages,
+                'potential_career_pages': potential_career_pages,
+                'rejected_urls': rejected_urls,
+                'career_page_analysis': career_page_analysis,
+                'total_urls_scanned': result.get('total_pages_crawled', 0),
+                'valid_career_pages': len(career_pages),
+                'confidence_score': confidence_score,
+                'crawl_time': (datetime.now() - start_time).total_seconds(),
+                'crawl_method': 'scrapy_optimized'
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in Scrapy career detection: {e}")
+            return {
+                'success': False,
+                'error_message': str(e),
+                'requested_url': url,
+                'crawl_time': (datetime.now() - start_time).total_seconds(),
+                'crawl_method': 'scrapy_optimized'
+            }
+
     def _calculate_confidence_score(self, career_pages: int, potential_pages: int, total_urls: int) -> float:
         """Calculate confidence score for career page detection"""
         if total_urls == 0:
