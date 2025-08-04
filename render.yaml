@@ -2,8 +2,13 @@ services:
   - type: web
     name: crawler-ai
     env: python
-    buildCommand: pip install -r requirements.txt
+    buildCommand: |
+      pip install --upgrade pip
+      pip install -r requirements.txt
+      playwright install chromium
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: PYTHON_VERSION
-        value: 3.11 
+        value: 3.11.18
+      - key: PLAYWRIGHT_BROWSERS_PATH
+        value: /opt/render/project/src/.cache/ms-playwright 
