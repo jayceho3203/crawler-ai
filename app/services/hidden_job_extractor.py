@@ -201,12 +201,12 @@ class HiddenJobExtractor:
                         
                         // Look for job-related JSON data
                         const patterns = [
-                            /jobs?\s*[:=]\s*(\[.*?\])/gi,
-                            /positions?\s*[:=]\s*(\[.*?\])/gi,
-                            /careers?\s*[:=]\s*(\[.*?\])/gi,
-                            /openings?\s*[:=]\s*(\[.*?\])/gi,
-                            /opportunities?\s*[:=]\s*(\[.*?\])/gi,
-                            /vacancies?\s*[:=]\s*(\[.*?\])/gi
+                            /jobs?\\s*[:=]\\s*(\\[.*?\\])/gi,
+                            /positions?\\s*[:=]\\s*(\\[.*?\\])/gi,
+                            /careers?\\s*[:=]\\s*(\\[.*?\\])/gi,
+                            /openings?\\s*[:=]\\s*(\\[.*?\\])/gi,
+                            /opportunities?\\s*[:=]\\s*(\\[.*?\\])/gi,
+                            /vacancies?\\s*[:=]\\s*(\\[.*?\\])/gi
                         ];
                         
                         for (const pattern of patterns) {
