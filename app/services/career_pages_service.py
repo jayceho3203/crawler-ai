@@ -25,7 +25,7 @@ class CareerPagesService:
             'tuyen-dung', 'viec-lam', 'co-hoi', 'tuyen-nhan-vien'
         ]
         
-        self.job_board_domains = JOB_BOARD_DOMAINS + [
+        self.job_board_domains = list(JOB_BOARD_DOMAINS) + [
             'jobs.vn', 'careerlink.vn', 'topcv.vn', 'mywork.vn',
             'indeed.com', 'linkedin.com/jobs', 'glassdoor.com'
         ]
