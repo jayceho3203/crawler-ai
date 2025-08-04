@@ -2,6 +2,7 @@ services:
   - type: web
     name: crawler-ai
     env: python
+    instanceType: free
     buildCommand: |
       pip install --upgrade pip
       pip install --only-binary=:all: -r requirements.txt
