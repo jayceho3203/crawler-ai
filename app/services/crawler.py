@@ -97,6 +97,10 @@ async def extract_with_playwright(url: str) -> Dict:
             # Extract HTML content
             html_content = await page.content()
             
+            # Close browser to free memory
+            await context.close()
+            await browser.close()
+            
             # Extract emails using regex
             email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
             emails = re.findall(email_pattern, html_content)
