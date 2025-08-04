@@ -74,8 +74,8 @@ class ContactInfoResponse(BaseModel):
 class CareerPagesRequest(BaseModel):
     """Request model for career page detection"""
     url: str
-    include_subdomain_search: bool = True
-    max_pages_to_scan: int = 50
+    include_subdomain_search: bool = False
+    max_pages_to_scan: int = 10
     strict_filtering: bool = True
     include_job_boards: bool = False
 
