@@ -78,6 +78,7 @@ class CareerPagesRequest(BaseModel):
     max_pages_to_scan: int = 30
     strict_filtering: bool = True
     include_job_boards: bool = False
+    use_scrapy: bool = True
 
 class CareerPagesResponse(BaseModel):
     """Response model for career page detection"""
