@@ -375,6 +375,20 @@ class OptimizedCareerSpider(scrapy.Spider):
         
         logger.info(f"✅ Optimized crawling completed: {self.crawled_pages} pages, {len(self.career_pages)} career pages found")
         
+        # Ghi kết quả vào FeedExporter
+        import json
+        import os
+        
+        # Tìm result file từ settings
+        feeds = self.crawler.settings.get('FEEDS', {})
+        if feeds:
+            result_file = list(feeds.keys())[0]  # Lấy file đầu tiên
+            try:
+                with open(result_file, 'w') as f:
+                    json.dump(result, f, indent=2)
+            except Exception as e:
+                logger.error(f"Error writing result file: {e}")
+        
         return result
 
 # Hàm chạy spider
@@ -402,39 +416,26 @@ from scrapy.utils.project import get_project_settings
 from app.services.scrapy_career_spider import OptimizedCareerSpider
 import json
 
-# Cấu hình settings
+# Cấu hình settings với FeedExporter
 settings = get_project_settings()
 settings.update({{
     'LOG_LEVEL': 'INFO',
     'TELNETCONSOLE_ENABLED': False,
     'LOGSTATS_INTERVAL': 60,
-    'MEMUSAGE_ENABLED': False
+    'MEMUSAGE_ENABLED': False,
+    'FEEDS': {{
+        '{result_file}': {{
+            'format': 'json',
+            'encoding': 'utf8',
+            'indent': 2,
+        }}
+    }}
 }})
 
-# Chạy spider và lấy kết quả từ closed method
+# Chạy spider - truyền class, không phải instance
 process = CrawlerProcess(settings)
-spider = OptimizedCareerSpider(start_url='{url}', max_pages={max_pages})
-process.crawl(spider)
+process.crawl(OptimizedCareerSpider, start_url='{url}', max_pages={max_pages})
 process.start()
-
-# Lấy kết quả từ spider - đảm bảo là dict
-result = spider.closed('finished')
-
-# Đảm bảo result là dict với format đúng
-if not isinstance(result, dict):
-    result = {{
-        'success': True,
-        'requested_url': '{url}',
-        'career_pages': result if isinstance(result, list) else [],
-        'total_pages_crawled': getattr(spider, 'crawled_pages', 0),
-        'career_pages_found': len(getattr(spider, 'career_pages', [])),
-        'crawl_time': 0,
-        'crawl_method': 'scrapy_optimized'
-    }}
-
-# Lưu kết quả
-with open('{result_file}', 'w') as f:
-    json.dump(result, f, indent=2)
 
 print("Scrapy completed successfully")
 '''
