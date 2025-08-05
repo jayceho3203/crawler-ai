@@ -12,7 +12,7 @@ from datetime import datetime
 from ..utils.constants import CAREER_KEYWORDS_VI, CAREER_SELECTORS, JOB_BOARD_DOMAINS
 from ..services.career_detector import filter_career_urls
 from .crawler import crawl_single_url
-# from .scrapy_career_spider import run_optimized_career_spider  # Temporarily disabled
+from .scrapy_career_spider import run_optimized_career_spider
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +33,7 @@ class CareerPagesService:
     
     async def detect_career_pages(self, url: str, include_subdomain_search: bool = False,
                                 max_pages_to_scan: int = 20, strict_filtering: bool = True,
-                                include_job_boards: bool = False, use_scrapy: bool = False) -> Dict:
+                                include_job_boards: bool = False, use_scrapy: bool = True) -> Dict:
         """
         Detect career pages with enhanced capabilities
         """
@@ -45,8 +45,7 @@ class CareerPagesService:
             # Use Scrapy if enabled (default)
             if use_scrapy:
                 logger.info("🚀 Using optimized Scrapy spider")
-                # return await self._detect_career_pages_scrapy(url, max_pages_to_scan)  # Temporarily disabled
-                logger.info("⚠️ Scrapy temporarily disabled due to Python 3.13 compatibility")
+                return await self._detect_career_pages_scrapy(url, max_pages_to_scan)
             
             # Fallback to original method
             logger.info("🔄 Using original crawling method")
