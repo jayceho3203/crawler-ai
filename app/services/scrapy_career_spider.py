@@ -393,12 +393,31 @@ async def run_optimized_career_spider(url: str, max_pages: int = 100) -> Dict:
             }
         })
         
-        # Tạo process
-        process = CrawlerProcess(settings)
+        # Tạo process với reactor mới
+        from scrapy.crawler import CrawlerRunner
+        from twisted.internet import reactor
+        
+        # Kiểm tra reactor đã chạy chưa
+        if reactor.running:
+            logger.warning("Reactor already running, using fallback method")
+            return {
+                'success': False,
+                'error_message': 'Reactor already running, please use regular endpoint',
+                'career_pages': [],
+                'total_pages_crawled': 0,
+                'career_pages_found': 0,
+                'crawl_time': 0,
+                'crawl_method': 'scrapy_optimized'
+            }
+        
+        # Tạo runner thay vì process
+        runner = CrawlerRunner(settings)
         
         # Chạy spider
-        process.crawl(OptimizedCareerSpider, start_url=url, max_pages=max_pages)
-        process.start()
+        deferred = runner.crawl(OptimizedCareerSpider, start_url=url, max_pages=max_pages)
+        
+        # Đợi kết quả
+        result = await deferred
         
         # Đọc kết quả
         try:
