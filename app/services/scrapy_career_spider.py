@@ -380,69 +380,102 @@ class OptimizedCareerSpider(scrapy.Spider):
 # Hàm chạy spider
 async def run_optimized_career_spider(url: str, max_pages: int = 100) -> Dict:
     """
-    Chạy optimized Scrapy spider
+    Chạy optimized Scrapy spider bằng subprocess để tránh reactor conflicts
     """
     try:
-        # Cấu hình settings với unique result file
         import os
         import time
+        import subprocess
+        import asyncio
         
-        settings = get_project_settings()
-        result_file = f'scrapy_result_{int(time.time())}.json'  # Unique filename
+        # Tạo unique result file
+        result_file = f'scrapy_result_{int(time.time())}.json'
         
-        settings.update({
-            'LOG_LEVEL': 'INFO',
-            'LOG_FORMAT': '%(asctime)s [%(name)s] %(levelname)s: %(message)s',
-            'FEEDS': {
-                result_file: {
-                    'format': 'json',
-                    'encoding': 'utf8',
-                    'indent': 2,
-                }
-            }
-        })
+        # Tạo temporary script để chạy Scrapy
+        script_content = f'''
+import sys
+import os
+sys.path.append(os.getcwd())
+
+from scrapy.crawler import CrawlerProcess
+from scrapy.utils.project import get_project_settings
+from app.services.scrapy_career_spider import OptimizedCareerSpider
+import json
+
+# Cấu hình settings
+settings = get_project_settings()
+settings.update({{
+    'LOG_LEVEL': 'INFO',
+    'FEEDS': {{
+        '{result_file}': {{
+            'format': 'json',
+            'encoding': 'utf8',
+            'indent': 2,
+        }}
+    }},
+    'TELNETCONSOLE_ENABLED': False,
+    'LOGSTATS_INTERVAL': 60,
+    'MEMUSAGE_ENABLED': False
+}})
+
+# Chạy spider
+process = CrawlerProcess(settings)
+process.crawl(OptimizedCareerSpider, start_url='{url}', max_pages={max_pages})
+process.start()
+
+print("Scrapy completed successfully")
+'''
         
-        # Tạo process với reactor mới
-        from scrapy.crawler import CrawlerRunner
-        from twisted.internet import reactor
-        from twisted.internet.defer import ensureDeferred
+        # Lưu script tạm
+        script_file = f'scrapy_script_{int(time.time())}.py'
+        with open(script_file, 'w') as f:
+            f.write(script_content)
         
-        # Kiểm tra reactor đã chạy chưa
-        if reactor.running:
-            logger.warning("Reactor already running, using fallback method")
+        # Chạy script bằng subprocess
+        start_time = time.time()
+        
+        process = await asyncio.create_subprocess_exec(
+            'python', script_file,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        
+        stdout, stderr = await process.communicate()
+        
+        crawl_time = time.time() - start_time
+        
+        # Cleanup script
+        try:
+            os.remove(script_file)
+        except:
+            pass
+        
+        # Kiểm tra kết quả
+        if process.returncode != 0:
+            logger.error(f"Scrapy subprocess failed: {stderr.decode()}")
             return {
                 'success': False,
-                'error_message': 'Reactor already running, please use regular endpoint',
-                'career_pages': [],
-                'total_pages_crawled': 0,
-                'career_pages_found': 0,
-                'crawl_time': 0,
+                'error_message': f'Scrapy subprocess failed: {stderr.decode()}',
+                'crawl_time': crawl_time,
                 'crawl_method': 'scrapy_optimized'
             }
         
-        # Tạo runner thay vì process
-        runner = CrawlerRunner(settings)
-        
-        # Chạy spider
-        deferred = runner.crawl(OptimizedCareerSpider, start_url=url, max_pages=max_pages)
-        
-        # Đợi kết quả - convert Deferred to coroutine
-        result = await ensureDeferred(deferred)
-        
-        # Đọc kết quả và cleanup
+        # Đọc kết quả
         try:
             with open(result_file, 'r') as f:
                 result = json.load(f)
-            # Cleanup temp file
+            # Cleanup result file
             try:
                 os.remove(result_file)
             except:
-                pass  # Ignore cleanup errors
+                pass
             return result
         except FileNotFoundError:
             return {
                 'success': False,
-                'error_message': 'No result file found'
+                'error_message': 'No result file found',
+                'crawl_time': crawl_time,
+                'crawl_method': 'scrapy_optimized'
             }
             
     except Exception as e:
