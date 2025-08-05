@@ -417,20 +417,20 @@ class CareerPagesService:
                 }
             
             # Format result to match API response
-            career_pages = [page['url'] for page in result.get('career_pages', [])]
+            career_pages = result.get('career_pages', [])  # Already list of URLs
             potential_career_pages = []
             rejected_urls = []
             
             # Create career page analysis
             career_page_analysis = []
-            for page in result.get('career_pages', []):
+            for page_url in career_pages:
                 analysis = {
-                    'url': page['url'],
+                    'url': page_url,
                     'is_career_page': True,
                     'is_potential': False,
-                    'confidence': page.get('confidence', 0.0),
+                    'confidence': 0.8,  # Default confidence for Scrapy results
                     'rejection_reason': None,
-                    'indicators': page.get('indicators', [])
+                    'indicators': ['Scrapy spider detected']
                 }
                 career_page_analysis.append(analysis)
             

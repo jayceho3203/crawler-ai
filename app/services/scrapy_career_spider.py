@@ -34,7 +34,7 @@ class OptimizedCareerSpider(scrapy.Spider):
         'USER_AGENT': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     }
     
-    def __init__(self, start_url: str = None, max_pages: int = 100, *args, **kwargs):
+    def __init__(self, start_url: str = None, max_pages: int = 50, *args, **kwargs):
         super(OptimizedCareerSpider, self).__init__(*args, **kwargs)
         self.start_urls = [start_url] if start_url else ['https://example.com']
         self.max_pages = max_pages
