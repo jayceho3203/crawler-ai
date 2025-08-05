@@ -32,7 +32,7 @@ class CareerPagesService:
         ]
     
     async def detect_career_pages(self, url: str, include_subdomain_search: bool = False,
-                                max_pages_to_scan: int = 20, strict_filtering: bool = True,
+                                max_pages_to_scan: int = 100, strict_filtering: bool = True,
                                 include_job_boards: bool = False, use_scrapy: bool = True) -> Dict:
         """
         Detect career pages with enhanced capabilities
