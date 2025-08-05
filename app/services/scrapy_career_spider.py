@@ -349,10 +349,18 @@ class OptimizedCareerSpider(scrapy.Spider):
         """
         Khi spider kết thúc
         """
+        # Convert career_pages to list of URLs
+        career_page_urls = []
+        for page in self.career_pages:
+            if isinstance(page, dict):
+                career_page_urls.append(page.get('url', ''))
+            else:
+                career_page_urls.append(str(page))
+        
         result = {
             'success': True,
             'requested_url': self.start_urls[0] if self.start_urls else '',
-            'career_pages': self.career_pages,
+            'career_pages': career_page_urls,
             'total_pages_crawled': self.crawled_pages,
             'career_pages_found': len(self.career_pages),
             'crawl_time': getattr(self, 'crawl_time', 0),
