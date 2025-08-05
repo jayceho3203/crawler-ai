@@ -10,6 +10,7 @@ from scrapy.utils.project import get_project_settings
 from urllib.parse import urljoin, urlparse
 import json
 import logging
+import time
 from typing import List, Dict, Optional
 
 logger = logging.getLogger(__name__)
@@ -41,6 +42,7 @@ class OptimizedCareerSpider(scrapy.Spider):
         self.crawled_pages = 0
         self.found_career_pages = 0
         self.domain = None
+        self.start_time = time.time()
         
     def start_requests(self):
         """
@@ -411,6 +413,8 @@ async def run_optimized_career_spider(url: str, max_pages: int = 20) -> Dict:
             
     except Exception as e:
         logger.error(f"Error running optimized spider: {e}")
+        import traceback
+        logger.error(f"Full traceback: {traceback.format_exc()}")
         return {
             'success': False,
             'error_message': str(e)
