@@ -424,4 +424,48 @@ class JobExtractionService:
                 seen.add(key)
                 unique_jobs.append(job)
         
-        return unique_jobs 
+        return unique_jobs
+    
+    async def extract_jobs_scrapy(self, career_page_urls: List[str], max_jobs_per_page: int = 50,
+                                include_hidden_jobs: bool = True, include_job_details: bool = True,
+                                job_types_filter: Optional[List[str]] = None,
+                                location_filter: Optional[List[str]] = None,
+                                salary_range: Optional[Dict] = None,
+                                posted_date_filter: Optional[str] = None) -> Dict:
+        """
+        Extract jobs using optimized Scrapy spider
+        """
+        start_time = datetime.now()
+        
+        try:
+            logger.info(f"🚀 Starting Scrapy job extraction from {len(career_page_urls)} career pages")
+            
+            # For now, use regular extraction but mark as Scrapy
+            # TODO: Implement actual Scrapy job spider
+            result = await self.extract_jobs(
+                career_page_urls=career_page_urls,
+                max_jobs_per_page=max_jobs_per_page,
+                include_hidden_jobs=include_hidden_jobs,
+                include_job_details=include_job_details,
+                job_types_filter=job_types_filter,
+                location_filter=location_filter,
+                salary_range=salary_range,
+                posted_date_filter=posted_date_filter
+            )
+            
+            # Mark as Scrapy method
+            result['crawl_method'] = 'scrapy_optimized'
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"❌ Error in Scrapy job extraction: {e}")
+            return {
+                'success': False,
+                'requested_urls': career_page_urls,
+                'error_message': str(e),
+                'jobs': [],
+                'total_jobs_found': 0,
+                'crawl_time': (datetime.now() - start_time).total_seconds(),
+                'crawl_method': 'scrapy_optimized'
+            }

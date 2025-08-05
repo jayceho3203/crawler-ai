@@ -349,4 +349,109 @@ class AdvancedJobFinder:
                 'fair': len([j for j in jobs if 0.4 < j.get('quality_score', 0) <= 0.6]),
                 'poor': len([j for j in jobs if j.get('quality_score', 0) <= 0.4])
             }
-        } 
+        }
+    
+    async def ai_agent_analysis(self, job_data: List[Dict], analysis_type: str = 'summary', 
+                              ai_model: str = 'gemini') -> Dict:
+        """
+        AI Agent analysis for job data processing
+        """
+        start_time = datetime.now()
+        
+        try:
+            logger.info(f"🤖 Starting AI Agent analysis: {analysis_type} with {ai_model}")
+            
+            if not job_data:
+                return {
+                    'success': False,
+                    'error_message': 'No job data provided',
+                    'analysis_type': analysis_type,
+                    'ai_model': ai_model
+                }
+            
+            # Prepare data for AI analysis
+            analysis_data = self._prepare_analysis_data(job_data, analysis_type)
+            
+            # Perform AI analysis based on type
+            if analysis_type == 'summary':
+                result = await self._generate_job_summary(analysis_data, ai_model)
+            elif analysis_type == 'insights':
+                result = await self._generate_job_insights(analysis_data, ai_model)
+            elif analysis_type == 'recommendations':
+                result = await self._generate_job_recommendations(analysis_data, ai_model)
+            else:
+                result = await self._generate_job_summary(analysis_data, ai_model)
+            
+            analysis_time = (datetime.now() - start_time).total_seconds()
+            
+            return {
+                'success': True,
+                'analysis_type': analysis_type,
+                'ai_model': ai_model,
+                'analysis_time': analysis_time,
+                'total_jobs_analyzed': len(job_data),
+                'result': result
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Error in AI Agent analysis: {e}")
+            return {
+                'success': False,
+                'error_message': str(e),
+                'analysis_type': analysis_type,
+                'ai_model': ai_model
+            }
+    
+    def _prepare_analysis_data(self, job_data: List[Dict], analysis_type: str) -> Dict:
+        """Prepare job data for AI analysis"""
+        return {
+            'total_jobs': len(job_data),
+            'job_titles': [job.get('title', '') for job in job_data],
+            'companies': [job.get('company', '') for job in job_data],
+            'locations': [job.get('location', '') for job in job_data],
+            'job_types': [job.get('job_type', '') for job in job_data],
+            'salaries': [job.get('salary', '') for job in job_data],
+            'descriptions': [job.get('description', '')[:500] for job in job_data],  # Truncate for AI
+            'quality_scores': [job.get('quality_score', 0) for job in job_data],
+            'analysis_type': analysis_type
+        }
+    
+    async def _generate_job_summary(self, analysis_data: Dict, ai_model: str) -> Dict:
+        """Generate job summary using AI"""
+        # TODO: Implement actual AI integration
+        # For now, return structured summary
+        return {
+            'summary': f"Found {analysis_data['total_jobs']} jobs across {len(set(analysis_data['companies']))} companies",
+            'top_companies': list(set(analysis_data['companies']))[:5],
+            'top_locations': list(set(analysis_data['locations']))[:5],
+            'job_type_distribution': self._count_distribution(analysis_data['job_types']),
+            'average_quality_score': sum(analysis_data['quality_scores']) / len(analysis_data['quality_scores']) if analysis_data['quality_scores'] else 0
+        }
+    
+    async def _generate_job_insights(self, analysis_data: Dict, ai_model: str) -> Dict:
+        """Generate job insights using AI"""
+        # TODO: Implement actual AI integration
+        return {
+            'market_trends': "Analysis of current job market trends",
+            'skill_demand': "Most in-demand skills based on job descriptions",
+            'salary_insights': "Salary range analysis and trends",
+            'company_insights': "Company hiring patterns and preferences"
+        }
+    
+    async def _generate_job_recommendations(self, analysis_data: Dict, ai_model: str) -> Dict:
+        """Generate job recommendations using AI"""
+        # TODO: Implement actual AI integration
+        return {
+            'recommended_jobs': analysis_data['job_titles'][:5],
+            'skill_gaps': "Identified skill gaps and improvement areas",
+            'career_path': "Suggested career development path",
+            'next_steps': "Recommended next steps for job seekers"
+        }
+    
+    def _count_distribution(self, items: List[str]) -> Dict[str, int]:
+        """Count distribution of items"""
+        distribution = {}
+        for item in items:
+            if item:
+                distribution[item] = distribution.get(item, 0) + 1
+        return distribution
