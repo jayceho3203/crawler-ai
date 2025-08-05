@@ -381,21 +381,24 @@ class OptimizedCareerSpider(scrapy.Spider):
         }
         
         logger.info(f"✅ Optimized crawling completed: {self.crawled_pages} pages, {len(self.career_pages)} career pages found")
+        logger.info(f"🔍 Career pages data: {self.career_pages}")
+        logger.info(f"🔍 Final result to write: {result}")
         
-        # Ghi kết quả trực tiếp - không dùng FeedExporter
+        # Ghi kết quả trực tiếp - KHÔNG dùng FeedExporter
         import json
         import os
+        import time
         
-        # Tìm result file từ settings
-        feeds = self.crawler.settings.get('FEEDS', {})
-        if feeds:
-            result_file = list(feeds.keys())[0]  # Lấy file đầu tiên
-            try:
-                # Ghi trực tiếp 1 object JSON duy nhất
-                with open(result_file, 'w') as f:
-                    json.dump(result, f, indent=2, ensure_ascii=False)
-            except Exception as e:
-                logger.error(f"Error writing result file: {e}")
+        # Ghi trực tiếp vào result file
+        result_file = f'scrapy_result_{int(time.time())}.json'
+        logger.info(f"🔍 Writing to result file: {result_file}")
+        try:
+            # Ghi trực tiếp 1 object JSON duy nhất
+            with open(result_file, 'w') as f:
+                json.dump(result, f, indent=2, ensure_ascii=False)
+            logger.info(f"✅ Successfully wrote result to {result_file}")
+        except Exception as e:
+            logger.error(f"Error writing result file: {e}")
         
         return result
 
@@ -424,21 +427,16 @@ from scrapy.utils.project import get_project_settings
 from app.services.scrapy_career_spider import OptimizedCareerSpider
 import json
 
-# Cấu hình settings - tắt FeedExporter để tránh conflict
+# Cấu hình settings - TẮT HOÀN TOÀN FeedExporter
 settings = get_project_settings()
 settings.update({{
     'LOG_LEVEL': 'INFO',
     'TELNETCONSOLE_ENABLED': False,
     'LOGSTATS_INTERVAL': 60,
     'MEMUSAGE_ENABLED': False,
-    'FEEDS': {{
-        '{result_file}': {{
-            'format': 'json',
-            'encoding': 'utf8',
-            'indent': 2,
-        }}
-    }},
-    # Tắt FeedExporter để tránh ghi nhiều objects
+    # TẮT FEEDS để tránh conflict với manual file writing
+    'FEEDS': None,
+    'FEED_EXPORT_ENABLED': False,
     'FEED_EXPORT_ENCODING': 'utf-8',
     'FEED_EXPORT_INDENT': 2
 }})
@@ -485,20 +483,36 @@ print("Scrapy completed successfully")
                 'crawl_method': 'scrapy_optimized'
             }
         
-        # Đọc kết quả
+        # Đọc kết quả - tìm file mới nhất
         try:
+            # Tìm file scrapy_result_*.json mới nhất
+            import glob
+            result_files = glob.glob('scrapy_result_*.json')
+            if result_files:
+                # Lấy file mới nhất
+                result_file = max(result_files, key=os.path.getctime)
+                logger.info(f"🔍 Found result file: {result_file}")
+            else:
+                raise FileNotFoundError("No result files found")
+            
             with open(result_file, 'r') as f:
                 content = f.read()
+                logger.info(f"🔍 Raw file content: {content[:200]}...")  # Debug log
+                
                 # Handle multiple JSON objects or extra data
                 try:
                     result = json.loads(content)
+                    logger.info(f"🔍 Parsed JSON result type: {type(result)}")
+                    logger.info(f"🔍 Parsed JSON result: {result}")
                 except json.JSONDecodeError:
                     # Try to find the last valid JSON object
                     lines = content.strip().split('\n')
+                    logger.info(f"🔍 Trying to parse {len(lines)} lines...")
                     for line in reversed(lines):
                         if line.strip():
                             try:
                                 result = json.loads(line)
+                                logger.info(f"🔍 Found valid JSON in line: {result}")
                                 break
                             except json.JSONDecodeError:
                                 continue
