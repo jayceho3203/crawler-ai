@@ -4,4 +4,3 @@ requests==2.32.3
 beautifulsoup4==4.12.3
 pydantic>=2.7.0
 playwright
-scrapy==2.11.0
