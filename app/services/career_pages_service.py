@@ -407,6 +407,20 @@ class CareerPagesService:
             # Run Scrapy spider
             result = await run_optimized_career_spider(url, max_pages)
             
+            # Debug log
+            logger.info(f"🔍 Scrapy result type: {type(result)}")
+            logger.info(f"🔍 Scrapy result value: {result}")
+            
+            # Handle error cases first
+            if not isinstance(result, dict):
+                return {
+                    'success': False,
+                    'error_message': f'Invalid result format: {type(result)} - Expected dict, got {type(result)}',
+                    'requested_url': url,
+                    'crawl_time': (datetime.now() - start_time).total_seconds(),
+                    'crawl_method': 'scrapy_optimized'
+                }
+            
             if not result.get('success', False):
                 return {
                     'success': False,
