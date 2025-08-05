@@ -433,30 +433,51 @@ class CareerPagesService:
             # Format result to match API response
             # Handle both dict and list formats
             if isinstance(result, dict):
-                career_pages = result.get('career_pages', [])
+                career_pages_raw = result.get('career_pages', [])
                 total_pages_crawled = result.get('total_pages_crawled', 0)
                 career_pages_found = result.get('career_pages_found', 0)
             else:
                 # If result is a list, assume it's career_pages
-                career_pages = result if isinstance(result, list) else []
+                career_pages_raw = result if isinstance(result, list) else []
                 total_pages_crawled = 0
-                career_pages_found = len(career_pages)
+                career_pages_found = len(career_pages_raw)
+            
+            # Convert career_pages to URL list for API compatibility
+            career_pages = []
+            career_page_analysis = []
+            
+            for page_data in career_pages_raw:
+                if isinstance(page_data, dict):
+                    # Extract URL from dict format
+                    page_url = page_data.get('url', '')
+                    if page_url:
+                        career_pages.append(page_url)
+                        
+                        # Create analysis from dict data
+                        analysis = {
+                            'url': page_url,
+                            'is_career_page': True,
+                            'is_potential': False,
+                            'confidence': page_data.get('confidence', 0.8),
+                            'rejection_reason': None,
+                            'indicators': page_data.get('indicators', ['Scrapy spider detected'])
+                        }
+                        career_page_analysis.append(analysis)
+                elif isinstance(page_data, str):
+                    # Direct URL string
+                    career_pages.append(page_data)
+                    analysis = {
+                        'url': page_data,
+                        'is_career_page': True,
+                        'is_potential': False,
+                        'confidence': 0.8,
+                        'rejection_reason': None,
+                        'indicators': ['Scrapy spider detected']
+                    }
+                    career_page_analysis.append(analysis)
             
             potential_career_pages = []
             rejected_urls = []
-            
-            # Create career page analysis
-            career_page_analysis = []
-            for page_url in career_pages:
-                analysis = {
-                    'url': page_url,
-                    'is_career_page': True,
-                    'is_potential': False,
-                    'confidence': 0.8,  # Default confidence for Scrapy results
-                    'rejection_reason': None,
-                    'indicators': ['Scrapy spider detected']
-                }
-                career_page_analysis.append(analysis)
             
             # Calculate confidence score
             confidence_score = self._calculate_confidence_score(
