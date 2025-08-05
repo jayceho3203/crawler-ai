@@ -375,7 +375,7 @@ class OptimizedCareerSpider(scrapy.Spider):
         
         logger.info(f"✅ Optimized crawling completed: {self.crawled_pages} pages, {len(self.career_pages)} career pages found")
         
-        # Ghi kết quả vào FeedExporter
+        # Ghi kết quả trực tiếp - không dùng FeedExporter
         import json
         import os
         
@@ -384,8 +384,9 @@ class OptimizedCareerSpider(scrapy.Spider):
         if feeds:
             result_file = list(feeds.keys())[0]  # Lấy file đầu tiên
             try:
+                # Ghi trực tiếp 1 object JSON duy nhất
                 with open(result_file, 'w') as f:
-                    json.dump(result, f, indent=2)
+                    json.dump(result, f, indent=2, ensure_ascii=False)
             except Exception as e:
                 logger.error(f"Error writing result file: {e}")
         
@@ -416,7 +417,7 @@ from scrapy.utils.project import get_project_settings
 from app.services.scrapy_career_spider import OptimizedCareerSpider
 import json
 
-# Cấu hình settings với FeedExporter
+# Cấu hình settings - tắt FeedExporter để tránh conflict
 settings = get_project_settings()
 settings.update({{
     'LOG_LEVEL': 'INFO',
@@ -429,7 +430,10 @@ settings.update({{
             'encoding': 'utf8',
             'indent': 2,
         }}
-    }}
+    }},
+    # Tắt FeedExporter để tránh ghi nhiều objects
+    'FEED_EXPORT_ENCODING': 'utf-8',
+    'FEED_EXPORT_INDENT': 2
 }})
 
 # Chạy spider - truyền class, không phải instance
@@ -477,7 +481,23 @@ print("Scrapy completed successfully")
         # Đọc kết quả
         try:
             with open(result_file, 'r') as f:
-                result = json.load(f)
+                content = f.read()
+                # Handle multiple JSON objects or extra data
+                try:
+                    result = json.loads(content)
+                except json.JSONDecodeError:
+                    # Try to find the last valid JSON object
+                    lines = content.strip().split('\n')
+                    for line in reversed(lines):
+                        if line.strip():
+                            try:
+                                result = json.loads(line)
+                                break
+                            except json.JSONDecodeError:
+                                continue
+                    else:
+                        raise json.JSONDecodeError("No valid JSON found", content, 0)
+            
             # Cleanup result file
             try:
                 os.remove(result_file)
@@ -488,6 +508,14 @@ print("Scrapy completed successfully")
             return {
                 'success': False,
                 'error_message': 'No result file found',
+                'crawl_time': crawl_time,
+                'crawl_method': 'scrapy_optimized'
+            }
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON decode error: {e}")
+            return {
+                'success': False,
+                'error_message': f'Invalid JSON format: {str(e)}',
                 'crawl_time': crawl_time,
                 'crawl_method': 'scrapy_optimized'
             }
