@@ -9,4 +9,6 @@ services:
       - key: PLAYWRIGHT_BROWSERS_PATH
         value: /opt/render/project/src/.cache/ms-playwright
       - key: PYTHONUNBUFFERED
-        value: "1" 
+        value: "1"
+      - key: PYTHON_VERSION
+        value: "3.11.9" 

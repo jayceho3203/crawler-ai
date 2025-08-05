@@ -219,7 +219,7 @@ class HiddenJobExtractor:
                                     }
                                 } catch (e) {
                                     // Try to extract individual job objects
-                                    const jobMatches = content.match(/\{[^}]*"title"[^}]*\}/gi);
+                                    const jobMatches = content.match(/\\{[^}]*"title"[^}]*\\}/gi);
                                     if (jobMatches) {
                                         for (const jobMatch of jobMatches) {
                                             try {
