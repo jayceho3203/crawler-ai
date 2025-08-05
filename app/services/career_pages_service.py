@@ -417,7 +417,17 @@ class CareerPagesService:
                 }
             
             # Format result to match API response
-            career_pages = result.get('career_pages', [])  # Already list of URLs
+            # Handle both dict and list formats
+            if isinstance(result, dict):
+                career_pages = result.get('career_pages', [])
+                total_pages_crawled = result.get('total_pages_crawled', 0)
+                career_pages_found = result.get('career_pages_found', 0)
+            else:
+                # If result is a list, assume it's career_pages
+                career_pages = result if isinstance(result, list) else []
+                total_pages_crawled = 0
+                career_pages_found = len(career_pages)
+            
             potential_career_pages = []
             rejected_urls = []
             
@@ -438,7 +448,7 @@ class CareerPagesService:
             confidence_score = self._calculate_confidence_score(
                 len(career_pages), 
                 len(potential_career_pages), 
-                result.get('total_pages_crawled', 0)
+                total_pages_crawled
             )
             
             return {
@@ -448,7 +458,7 @@ class CareerPagesService:
                 'potential_career_pages': potential_career_pages,
                 'rejected_urls': rejected_urls,
                 'career_page_analysis': career_page_analysis,
-                'total_urls_scanned': result.get('total_pages_crawled', 0),
+                'total_urls_scanned': total_pages_crawled,
                 'valid_career_pages': len(career_pages),
                 'confidence_score': confidence_score,
                 'crawl_time': (datetime.now() - start_time).total_seconds(),

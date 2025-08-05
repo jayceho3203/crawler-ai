@@ -406,22 +406,35 @@ import json
 settings = get_project_settings()
 settings.update({{
     'LOG_LEVEL': 'INFO',
-    'FEEDS': {{
-        '{result_file}': {{
-            'format': 'json',
-            'encoding': 'utf8',
-            'indent': 2,
-        }}
-    }},
     'TELNETCONSOLE_ENABLED': False,
     'LOGSTATS_INTERVAL': 60,
     'MEMUSAGE_ENABLED': False
 }})
 
-# Chạy spider
+# Chạy spider và lấy kết quả từ closed method
 process = CrawlerProcess(settings)
-process.crawl(OptimizedCareerSpider, start_url='{url}', max_pages={max_pages})
+spider = OptimizedCareerSpider(start_url='{url}', max_pages={max_pages})
+process.crawl(spider)
 process.start()
+
+# Lấy kết quả từ spider - đảm bảo là dict
+result = spider.closed('finished')
+
+# Đảm bảo result là dict với format đúng
+if not isinstance(result, dict):
+    result = {{
+        'success': True,
+        'requested_url': '{url}',
+        'career_pages': result if isinstance(result, list) else [],
+        'total_pages_crawled': getattr(spider, 'crawled_pages', 0),
+        'career_pages_found': len(getattr(spider, 'career_pages', [])),
+        'crawl_time': 0,
+        'crawl_method': 'scrapy_optimized'
+    }}
+
+# Lưu kết quả
+with open('{result_file}', 'w') as f:
+    json.dump(result, f, indent=2)
 
 print("Scrapy completed successfully")
 '''
