@@ -31,7 +31,11 @@ class OptimizedCareerSpider(scrapy.Spider):
         'DOWNLOAD_TIMEOUT': 15,          # Timeout 15s
         'RETRY_TIMES': 2,                # Retry 2 lần
         'RETRY_HTTP_CODES': [500, 502, 503, 504, 408, 429],
-        'USER_AGENT': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        'USER_AGENT': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        # Tắt extensions không cần thiết để log sạch hơn
+        'TELNETCONSOLE_ENABLED': False,  # Tắt Telnet để tránh lỗi ConnectionDone
+        'LOGSTATS_INTERVAL': 60,         # Giảm log stats frequency
+        'MEMUSAGE_ENABLED': False        # Tắt memory usage tracking
     }
     
     def __init__(self, start_url: str = None, max_pages: int = 50, *args, **kwargs):
@@ -379,13 +383,18 @@ async def run_optimized_career_spider(url: str, max_pages: int = 100) -> Dict:
     Chạy optimized Scrapy spider
     """
     try:
-        # Cấu hình settings
+        # Cấu hình settings với unique result file
+        import os
+        import time
+        
         settings = get_project_settings()
+        result_file = f'scrapy_result_{int(time.time())}.json'  # Unique filename
+        
         settings.update({
             'LOG_LEVEL': 'INFO',
             'LOG_FORMAT': '%(asctime)s [%(name)s] %(levelname)s: %(message)s',
             'FEEDS': {
-                'scrapy_result.json': {
+                result_file: {
                     'format': 'json',
                     'encoding': 'utf8',
                     'indent': 2,
@@ -396,6 +405,7 @@ async def run_optimized_career_spider(url: str, max_pages: int = 100) -> Dict:
         # Tạo process với reactor mới
         from scrapy.crawler import CrawlerRunner
         from twisted.internet import reactor
+        from twisted.internet.defer import ensureDeferred
         
         # Kiểm tra reactor đã chạy chưa
         if reactor.running:
@@ -416,13 +426,18 @@ async def run_optimized_career_spider(url: str, max_pages: int = 100) -> Dict:
         # Chạy spider
         deferred = runner.crawl(OptimizedCareerSpider, start_url=url, max_pages=max_pages)
         
-        # Đợi kết quả
-        result = await deferred
+        # Đợi kết quả - convert Deferred to coroutine
+        result = await ensureDeferred(deferred)
         
-        # Đọc kết quả
+        # Đọc kết quả và cleanup
         try:
-            with open('scrapy_result.json', 'r') as f:
+            with open(result_file, 'r') as f:
                 result = json.load(f)
+            # Cleanup temp file
+            try:
+                os.remove(result_file)
+            except:
+                pass  # Ignore cleanup errors
             return result
         except FileNotFoundError:
             return {
