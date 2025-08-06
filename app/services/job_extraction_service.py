@@ -470,58 +470,112 @@ class JobExtractionService:
                 'crawl_method': 'scrapy_optimized'
             }
     
-    async def extract_job_urls_only(self, career_page_url: str, max_jobs: int = 50) -> Dict:
+    async def extract_job_urls_only(self, career_page_url: str, max_jobs: int = 50, include_job_data: bool = False) -> Dict:
         """
-        Extract only job URLs from a career page (no details)
+        Smart job extraction - handle all possible cases
         """
         start_time = datetime.now()
         
         try:
-            logger.info(f"🔗 Extracting job URLs from: {career_page_url}")
+            logger.info(f"🔗 Smart job extraction from: {career_page_url}")
             
-            # Use existing job extraction but only get URLs
+            # Step 1: Try to extract jobs with URLs first
             result = await self._extract_jobs_from_single_page(
-                career_page_url, max_jobs, include_hidden_jobs=True, include_job_details=False
+                career_page_url, max_jobs, include_hidden_jobs=True, include_job_details=include_job_data
             )
             
             if result['success']:
-                # Extract only URLs from jobs
+                jobs = result.get('jobs', [])
                 job_urls = []
-                for job in result.get('jobs', []):
-                    if job.get('url'):
-                        job_urls.append(job['url'])
+                has_individual_urls = False
+                extraction_type = "unknown"
+                
+                # Step 2: Analyze job structure
+                analysis = self._analyze_job_structure(jobs, career_page_url)
+                
+                # Step 3: Handle different cases
+                if analysis['has_individual_urls']:
+                    # Case 1: Jobs have individual URLs
+                    extraction_type = "urls_only"
+                    job_urls = analysis['job_urls']
+                    has_individual_urls = True
+                    logger.info(f"   📊 Case: Jobs with individual URLs ({len(job_urls)} found)")
+                    
+                elif analysis['has_job_data']:
+                    # Case 2: Jobs displayed directly on page
+                    extraction_type = "data_only"
+                    has_individual_urls = False
+                    logger.info(f"   📊 Case: Jobs displayed directly on page ({len(jobs)} found)")
+                    
+                else:
+                    # Case 3: No jobs found, try alternative methods
+                    logger.info(f"   📊 Case: No jobs found, trying alternative methods")
+                    alternative_result = await self._try_alternative_extraction_methods(career_page_url, max_jobs)
+                    
+                    if alternative_result['success']:
+                        jobs = alternative_result['jobs']
+                        extraction_type = alternative_result['extraction_type']
+                        has_individual_urls = alternative_result['has_individual_urls']
+                        logger.info(f"   📊 Alternative method successful: {extraction_type}")
+                    else:
+                        extraction_type = "no_jobs_found"
+                        logger.warning(f"   📊 No jobs found with any method")
                 
                 crawl_time = (datetime.now() - start_time).total_seconds()
                 
-                logger.info(f"✅ Found {len(job_urls)} job URLs from {career_page_url}")
+                logger.info(f"✅ Smart extraction completed:")
+                logger.info(f"   📊 Total jobs found: {len(jobs)}")
+                logger.info(f"   📊 Extraction type: {extraction_type}")
+                logger.info(f"   📊 Has individual URLs: {has_individual_urls}")
                 
-                return {
+                response = {
                     'success': True,
                     'career_page_url': career_page_url,
-                    'job_urls': job_urls,
-                    'total_job_urls_found': len(job_urls),
+                    'extraction_type': extraction_type,
+                    'total_jobs_found': len(jobs),
+                    'has_individual_urls': has_individual_urls,
                     'crawl_time': crawl_time,
-                    'crawl_method': 'scrapy_optimized'
+                    'crawl_method': 'scrapy_optimized',
+                    'analysis': analysis
                 }
+                
+                if include_job_data or extraction_type in ["data_only", "mixed"]:
+                    # Return job data
+                    response['jobs'] = jobs
+                
+                if extraction_type in ["urls_only", "mixed"]:
+                    # Return job URLs
+                    response['job_urls'] = job_urls
+                    response['total_job_urls_found'] = len(job_urls)
+                
+                return response
             else:
                 return {
                     'success': False,
                     'career_page_url': career_page_url,
-                    'error_message': result.get('error_message', 'Failed to extract job URLs'),
+                    'error_message': result.get('error_message', 'Failed to extract jobs'),
+                    'extraction_type': 'failed',
                     'job_urls': [],
+                    'jobs': [],
                     'total_job_urls_found': 0,
+                    'total_jobs_found': 0,
+                    'has_individual_urls': False,
                     'crawl_time': (datetime.now() - start_time).total_seconds(),
                     'crawl_method': 'scrapy_optimized'
                 }
                 
         except Exception as e:
-            logger.error(f"❌ Error extracting job URLs: {e}")
+            logger.error(f"❌ Error in smart job extraction: {e}")
             return {
                 'success': False,
                 'career_page_url': career_page_url,
                 'error_message': str(e),
+                'extraction_type': 'error',
                 'job_urls': [],
+                'jobs': [],
                 'total_job_urls_found': 0,
+                'total_jobs_found': 0,
+                'has_individual_urls': False,
                 'crawl_time': (datetime.now() - start_time).total_seconds(),
                 'crawl_method': 'scrapy_optimized'
             }
@@ -645,3 +699,158 @@ class JobExtractionService:
                 'requirements': '',
                 'benefits': ''
             }
+    
+    def _analyze_job_structure(self, jobs: List[Dict], career_page_url: str) -> Dict:
+        """Analyze job structure to determine extraction type"""
+        analysis = {
+            'has_individual_urls': False,
+            'has_job_data': False,
+            'job_urls': [],
+            'job_count': len(jobs),
+            'url_count': 0,
+            'data_count': 0
+        }
+        
+        for job in jobs:
+            # Check if job has individual URL
+            if job.get('url') and job['url'] != career_page_url:
+                analysis['job_urls'].append(job['url'])
+                analysis['url_count'] += 1
+            
+            # Check if job has data
+            if job.get('title') or job.get('description'):
+                analysis['data_count'] += 1
+        
+        analysis['has_individual_urls'] = analysis['url_count'] > 0
+        analysis['has_job_data'] = analysis['data_count'] > 0
+        
+        return analysis
+    
+    async def _try_alternative_extraction_methods(self, career_page_url: str, max_jobs: int) -> Dict:
+        """Try alternative extraction methods when standard method fails"""
+        try:
+            logger.info(f"   🔍 Trying alternative extraction methods for: {career_page_url}")
+            
+            # Method 1: Try to extract from HTML directly
+            result = await crawl_single_url(career_page_url)
+            if result['success']:
+                html_jobs = self._extract_jobs_from_html_directly(result['html'], career_page_url)
+                if html_jobs:
+                    logger.info(f"   ✅ HTML direct extraction found {len(html_jobs)} jobs")
+                    return {
+                        'success': True,
+                        'jobs': html_jobs,
+                        'extraction_type': 'html_direct',
+                        'has_individual_urls': False
+                    }
+            
+            # Method 2: Try to find job listings in common patterns
+            pattern_jobs = await self._extract_jobs_from_patterns(career_page_url)
+            if pattern_jobs:
+                logger.info(f"   ✅ Pattern extraction found {len(pattern_jobs)} jobs")
+                return {
+                    'success': True,
+                    'jobs': pattern_jobs,
+                    'extraction_type': 'pattern_based',
+                    'has_individual_urls': False
+                }
+            
+            # Method 3: Try to extract from JavaScript data
+            js_jobs = await self._extract_jobs_from_javascript(career_page_url)
+            if js_jobs:
+                logger.info(f"   ✅ JavaScript extraction found {len(js_jobs)} jobs")
+                return {
+                    'success': True,
+                    'jobs': js_jobs,
+                    'extraction_type': 'javascript',
+                    'has_individual_urls': False
+                }
+            
+            logger.warning(f"   ❌ All alternative methods failed")
+            return {
+                'success': False,
+                'jobs': [],
+                'extraction_type': 'failed',
+                'has_individual_urls': False
+            }
+            
+        except Exception as e:
+            logger.error(f"   ❌ Error in alternative extraction: {e}")
+            return {
+                'success': False,
+                'jobs': [],
+                'extraction_type': 'error',
+                'has_individual_urls': False
+            }
+    
+    def _extract_jobs_from_html_directly(self, html_content: str, base_url: str) -> List[Dict]:
+        """Extract jobs directly from HTML content"""
+        try:
+            from bs4 import BeautifulSoup
+            
+            soup = BeautifulSoup(html_content, 'html.parser')
+            jobs = []
+            
+            # Common job listing selectors
+            job_selectors = [
+                '.job-listing', '.job-item', '.career-item', '.position-item',
+                '.job-card', '.career-card', '.position-card',
+                '[class*="job"]', '[class*="career"]', '[class*="position"]'
+            ]
+            
+            for selector in job_selectors:
+                job_elements = soup.select(selector)
+                if job_elements:
+                    logger.info(f"   📊 Found {len(job_elements)} job elements with selector: {selector}")
+                    
+                    for element in job_elements[:50]:  # Limit to 50 jobs
+                        job = self._extract_job_from_element(element, base_url)
+                        if job and job.get('title'):
+                            jobs.append(job)
+                    
+                    if jobs:
+                        break
+            
+            return jobs
+            
+        except Exception as e:
+            logger.error(f"Error extracting jobs from HTML: {e}")
+            return []
+    
+    async def _extract_jobs_from_patterns(self, career_page_url: str) -> List[Dict]:
+        """Extract jobs using common patterns"""
+        try:
+            # Common career page patterns
+            patterns = [
+                f"{career_page_url}/jobs",
+                f"{career_page_url}/careers", 
+                f"{career_page_url}/positions",
+                f"{career_page_url}/opportunities"
+            ]
+            
+            for pattern_url in patterns:
+                try:
+                    result = await crawl_single_url(pattern_url)
+                    if result['success']:
+                        jobs = self._extract_jobs_from_html_directly(result['html'], pattern_url)
+                        if jobs:
+                            return jobs
+                except:
+                    continue
+            
+            return []
+            
+        except Exception as e:
+            logger.error(f"Error extracting jobs from patterns: {e}")
+            return []
+    
+    async def _extract_jobs_from_javascript(self, career_page_url: str) -> List[Dict]:
+        """Extract jobs from JavaScript data (basic implementation)"""
+        try:
+            # This would require more sophisticated JavaScript execution
+            # For now, return empty list
+            return []
+            
+        except Exception as e:
+            logger.error(f"Error extracting jobs from JavaScript: {e}")
+            return []
