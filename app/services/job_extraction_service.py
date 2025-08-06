@@ -709,12 +709,36 @@ class JobExtractionService:
                 if location:
                     job_details['location'] = location
             
+            # Extract posted date from description
+            if not job_details['posted_date']:
+                posted_date = self._extract_posted_date_from_description(job_details['description'])
+                if posted_date:
+                    job_details['posted_date'] = posted_date
+            
+            # Extract salary from description
+            if not job_details['salary']:
+                salary = self._extract_salary_from_description(job_details['description'])
+                if salary:
+                    job_details['salary'] = salary
+            
+            # Extract requirements and benefits from description
+            if job_details['description']:
+                requirements, benefits = self._extract_requirements_and_benefits(job_details['description'])
+                if requirements:
+                    job_details['requirements'] = requirements
+                if benefits:
+                    job_details['benefits'] = benefits
+            
             # Debug logging
             logger.info(f"🔍 Job extraction debug:")
             logger.info(f"   📄 Title found: {bool(job_details['title'])}")
             logger.info(f"   📄 Description found: {bool(job_details['description'])}")
             logger.info(f"   📄 Company found: {bool(job_details['company'])}")
             logger.info(f"   📄 Location found: {bool(job_details['location'])}")
+            logger.info(f"   📄 Posted date found: {bool(job_details['posted_date'])}")
+            logger.info(f"   📄 Salary found: {bool(job_details['salary'])}")
+            logger.info(f"   📄 Requirements found: {bool(job_details['requirements'])}")
+            logger.info(f"   📄 Benefits found: {bool(job_details['benefits'])}")
             
             # If no job details found, try alternative extraction
             if not job_details['title'] and not job_details['description']:
@@ -785,6 +809,68 @@ class JobExtractionService:
         except Exception as e:
             logger.error(f"❌ Error in alternative job extraction: {e}")
             return {}
+    
+    def _extract_posted_date_from_description(self, description: str) -> Optional[str]:
+        """Extract posted date from job description"""
+        try:
+            import re
+            
+            # Common date patterns
+            date_patterns = [
+                r'ngày đăng[:\s]*(\d{1,2}/\d{1,2}/\d{4})',
+                r'posted[:\s]*(\d{1,2}/\d{1,2}/\d{4})',
+                r'date[:\s]*(\d{1,2}/\d{1,2}/\d{4})',
+                r'(\d{1,2}/\d{1,2}/\d{4})'
+            ]
+            
+            for pattern in date_patterns:
+                match = re.search(pattern, description, re.IGNORECASE)
+                if match:
+                    return match.group(1)
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"❌ Error extracting posted date: {e}")
+            return None
+    
+    def _extract_requirements_and_benefits(self, description: str) -> tuple[Optional[str], Optional[str]]:
+        """Extract requirements and benefits from job description"""
+        try:
+            requirements = ""
+            benefits = ""
+            
+            # Split description into sections
+            lines = description.split('\n')
+            current_section = ""
+            
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
+                
+                # Detect section headers
+                if any(keyword in line.lower() for keyword in ['yêu cầu', 'requirements', 'điều kiện']):
+                    current_section = "requirements"
+                    continue
+                elif any(keyword in line.lower() for keyword in ['quyền lợi', 'benefits', 'phúc lợi', 'lợi ích']):
+                    current_section = "benefits"
+                    continue
+                elif any(keyword in line.lower() for keyword in ['mô tả', 'description', 'công việc']):
+                    current_section = "description"
+                    continue
+                
+                # Add content to appropriate section
+                if current_section == "requirements" and line.startswith('-'):
+                    requirements += line + "\n"
+                elif current_section == "benefits" and line.startswith('-'):
+                    benefits += line + "\n"
+            
+            return requirements.strip(), benefits.strip()
+            
+        except Exception as e:
+            logger.error(f"❌ Error extracting requirements and benefits: {e}")
+            return None, None
     
     async def _extract_job_urls_from_career_page(self, career_page_url: str) -> List[str]:
         """Extract job URLs directly from career page HTML"""
