@@ -396,8 +396,16 @@ class JobExtractionService:
         """Extract salary information from job description"""
         import re
         
-        # Common salary patterns
+        # Enhanced salary patterns for Vietnamese job postings
         salary_patterns = [
+            r'lương\s*up\s*to[:\s]*([^,\n]+)',
+            r'lương[:\s]*([^,\n]+)',
+            r'salary[:\s]*([^,\n]+)',
+            r'up\s*to[:\s]*([^,\n]+)',
+            r'(\d+[kKmM])',
+            r'(\$\d+[kKmM]?)',
+            r'(\d+\s*[tT]r[iỉ][eệ][uú])',
+            r'(\d+\s*[mM]illion)',
             r'(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)\s*(?:USD|VND|đồng|dollar)',
             r'(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)\s*(?:triệu|million)',
             r'(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)\s*(?:k|K)',
@@ -405,9 +413,12 @@ class JobExtractionService:
         ]
         
         for pattern in salary_patterns:
-            matches = re.findall(pattern, description, re.IGNORECASE)
-            if matches:
-                return f"{matches[0]} VND"  # Default to VND
+            match = re.search(pattern, description, re.IGNORECASE)
+            if match:
+                salary = match.group(1).strip()
+                # Clean up the salary text
+                if salary and len(salary) > 0:
+                    return salary
         
         return None
     
@@ -696,12 +707,25 @@ class JobExtractionService:
                         job_details['company'] = company_text
                         break
             
-            # Fallback: Extract company name from URL
+            # Enhanced company extraction from URL
             if not job_details['company']:
                 parsed = urlparse(job_url)
-                company_name = parsed.netloc.split('.')[0]
-                if company_name and company_name != 'www':
-                    job_details['company'] = company_name.title()
+                domain = parsed.netloc.lower()
+                
+                # Extract company name from domain
+                if 'ics-p.vn' in domain:
+                    job_details['company'] = 'ICSP Việt Nam'
+                elif 'fpt.com' in domain:
+                    job_details['company'] = 'FPT'
+                elif 'tma.vn' in domain:
+                    job_details['company'] = 'TMA Solutions'
+                elif 'vng.com' in domain:
+                    job_details['company'] = 'VNG'
+                else:
+                    # Generic extraction
+                    company_name = parsed.netloc.split('.')[0]
+                    if company_name and company_name != 'www':
+                        job_details['company'] = company_name.title()
             
             # Extract location from description
             if not job_details['location']:
