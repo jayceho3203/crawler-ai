@@ -469,3 +469,179 @@ class JobExtractionService:
                 'crawl_time': (datetime.now() - start_time).total_seconds(),
                 'crawl_method': 'scrapy_optimized'
             }
+    
+    async def extract_job_urls_only(self, career_page_url: str, max_jobs: int = 50) -> Dict:
+        """
+        Extract only job URLs from a career page (no details)
+        """
+        start_time = datetime.now()
+        
+        try:
+            logger.info(f"🔗 Extracting job URLs from: {career_page_url}")
+            
+            # Use existing job extraction but only get URLs
+            result = await self._extract_jobs_from_single_page(
+                career_page_url, max_jobs, include_hidden_jobs=True, include_job_details=False
+            )
+            
+            if result['success']:
+                # Extract only URLs from jobs
+                job_urls = []
+                for job in result.get('jobs', []):
+                    if job.get('url'):
+                        job_urls.append(job['url'])
+                
+                crawl_time = (datetime.now() - start_time).total_seconds()
+                
+                logger.info(f"✅ Found {len(job_urls)} job URLs from {career_page_url}")
+                
+                return {
+                    'success': True,
+                    'career_page_url': career_page_url,
+                    'job_urls': job_urls,
+                    'total_job_urls_found': len(job_urls),
+                    'crawl_time': crawl_time,
+                    'crawl_method': 'scrapy_optimized'
+                }
+            else:
+                return {
+                    'success': False,
+                    'career_page_url': career_page_url,
+                    'error_message': result.get('error_message', 'Failed to extract job URLs'),
+                    'job_urls': [],
+                    'total_job_urls_found': 0,
+                    'crawl_time': (datetime.now() - start_time).total_seconds(),
+                    'crawl_method': 'scrapy_optimized'
+                }
+                
+        except Exception as e:
+            logger.error(f"❌ Error extracting job URLs: {e}")
+            return {
+                'success': False,
+                'career_page_url': career_page_url,
+                'error_message': str(e),
+                'job_urls': [],
+                'total_job_urls_found': 0,
+                'crawl_time': (datetime.now() - start_time).total_seconds(),
+                'crawl_method': 'scrapy_optimized'
+            }
+    
+    async def extract_job_details_only(self, job_url: str) -> Dict:
+        """
+        Extract detailed job information from a single job URL
+        """
+        start_time = datetime.now()
+        
+        try:
+            logger.info(f"📄 Extracting job details from: {job_url}")
+            
+            # Crawl the job page
+            result = await crawl_single_url(job_url)
+            
+            if not result['success']:
+                return {
+                    'success': False,
+                    'job_url': job_url,
+                    'error_message': 'Failed to crawl job page',
+                    'job_details': {},
+                    'crawl_time': (datetime.now() - start_time).total_seconds(),
+                    'crawl_method': 'scrapy_optimized'
+                }
+            
+            # Extract job details from HTML
+            job_details = await self._extract_job_details_from_html(result, job_url)
+            
+            crawl_time = (datetime.now() - start_time).total_seconds()
+            
+            logger.info(f"✅ Extracted job details from {job_url}")
+            
+            return {
+                'success': True,
+                'job_url': job_url,
+                'job_details': job_details,
+                'crawl_time': crawl_time,
+                'crawl_method': 'scrapy_optimized'
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Error extracting job details: {e}")
+            return {
+                'success': False,
+                'job_url': job_url,
+                'error_message': str(e),
+                'job_details': {},
+                'crawl_time': (datetime.now() - start_time).total_seconds(),
+                'crawl_method': 'scrapy_optimized'
+            }
+    
+    async def _extract_job_details_from_html(self, result: Dict, job_url: str) -> Dict:
+        """Extract job details from HTML content"""
+        try:
+            from bs4 import BeautifulSoup
+            
+            html_content = result.get('html', '')
+            soup = BeautifulSoup(html_content, 'html.parser')
+            
+            job_details = {
+                'title': '',
+                'company': '',
+                'location': '',
+                'job_type': 'Full-time',
+                'salary': '',
+                'posted_date': '',
+                'url': job_url,
+                'description': '',
+                'requirements': '',
+                'benefits': ''
+            }
+            
+            # Extract title
+            title_selectors = ['h1', '.job-title', '.position-title', '.title']
+            for selector in title_selectors:
+                title_element = soup.select_one(selector)
+                if title_element:
+                    job_details['title'] = title_element.get_text().strip()
+                    break
+            
+            # Extract description
+            desc_selectors = ['.job-description', '.description', '.content', 'p']
+            for selector in desc_selectors:
+                desc_element = soup.select_one(selector)
+                if desc_element:
+                    job_details['description'] = desc_element.get_text().strip()[:2000]
+                    break
+            
+            # Extract company name from URL if not found
+            if not job_details['company']:
+                parsed = urlparse(job_url)
+                company_name = parsed.netloc.split('.')[0]
+                job_details['company'] = company_name.title()
+            
+            # Extract location from description
+            if not job_details['location']:
+                location = self._extract_location_from_description(job_details['description'])
+                if location:
+                    job_details['location'] = location
+            
+            # Extract salary from description
+            if not job_details['salary']:
+                salary = self._extract_salary_from_description(job_details['description'])
+                if salary:
+                    job_details['salary'] = salary
+            
+            return job_details
+            
+        except Exception as e:
+            logger.error(f"Error extracting job details from HTML: {e}")
+            return {
+                'title': '',
+                'company': '',
+                'location': '',
+                'job_type': 'Full-time',
+                'salary': '',
+                'posted_date': '',
+                'url': job_url,
+                'description': '',
+                'requirements': '',
+                'benefits': ''
+            }
