@@ -654,16 +654,11 @@ class JobExtractionService:
             soup = BeautifulSoup(html_content, 'html.parser')
             
             job_details = {
-                'title': '',
-                'company': '',
-                'location': '',
-                'job_type': 'Full-time',
-                'salary': '',
-                'posted_date': '',
-                'url': job_url,
-                'description': '',
-                'requirements': '',
-                'benefits': ''
+                'title': '',           # Job Name
+                'job_type': 'Full-time', # Job Type
+                'job_role': '',        # Job Role (same as title)
+                'description': '',     # Job Description
+                'url': job_url         # Job Link
             }
             
             # Enhanced title extraction
@@ -678,6 +673,7 @@ class JobExtractionService:
                     title_text = title_element.get_text().strip()
                     if title_text and len(title_text) > 3:
                         job_details['title'] = title_text
+                        job_details['job_role'] = title_text  # Set job_role same as title
                         break
             
             # Enhanced description extraction
@@ -707,62 +703,19 @@ class JobExtractionService:
                         job_details['company'] = company_text
                         break
             
-            # Enhanced company extraction from URL
-            if not job_details['company']:
-                parsed = urlparse(job_url)
-                domain = parsed.netloc.lower()
-                
-                # Extract company name from domain
-                if 'ics-p.vn' in domain:
-                    job_details['company'] = 'ICSP Việt Nam'
-                elif 'fpt.com' in domain:
-                    job_details['company'] = 'FPT'
-                elif 'tma.vn' in domain:
-                    job_details['company'] = 'TMA Solutions'
-                elif 'vng.com' in domain:
-                    job_details['company'] = 'VNG'
-                else:
-                    # Generic extraction
-                    company_name = parsed.netloc.split('.')[0]
-                    if company_name and company_name != 'www':
-                        job_details['company'] = company_name.title()
+            # Company info is already in Wehappi company details, so we skip it here
             
-            # Extract location from description
-            if not job_details['location']:
-                location = self._extract_location_from_description(job_details['description'])
-                if location:
-                    job_details['location'] = location
+            # Set job_role same as title for Wehappi
+            if job_details['title']:
+                job_details['job_role'] = job_details['title']
             
-            # Extract posted date from description
-            if not job_details['posted_date']:
-                posted_date = self._extract_posted_date_from_description(job_details['description'])
-                if posted_date:
-                    job_details['posted_date'] = posted_date
-            
-            # Extract salary from description
-            if not job_details['salary']:
-                salary = self._extract_salary_from_description(job_details['description'])
-                if salary:
-                    job_details['salary'] = salary
-            
-            # Extract requirements and benefits from description
-            if job_details['description']:
-                requirements, benefits = self._extract_requirements_and_benefits(job_details['description'])
-                if requirements:
-                    job_details['requirements'] = requirements
-                if benefits:
-                    job_details['benefits'] = benefits
-            
-            # Debug logging
-            logger.info(f"🔍 Job extraction debug:")
-            logger.info(f"   📄 Title found: {bool(job_details['title'])}")
-            logger.info(f"   📄 Description found: {bool(job_details['description'])}")
-            logger.info(f"   📄 Company found: {bool(job_details['company'])}")
-            logger.info(f"   📄 Location found: {bool(job_details['location'])}")
-            logger.info(f"   📄 Posted date found: {bool(job_details['posted_date'])}")
-            logger.info(f"   📄 Salary found: {bool(job_details['salary'])}")
-            logger.info(f"   📄 Requirements found: {bool(job_details['requirements'])}")
-            logger.info(f"   📄 Benefits found: {bool(job_details['benefits'])}")
+            # Debug logging for Wehappi fields
+            logger.info(f"🔍 Job extraction debug (Wehappi fields):")
+            logger.info(f"   📄 Job Name (title): {bool(job_details['title'])}")
+            logger.info(f"   📄 Job Type: {bool(job_details['job_type'])}")
+            logger.info(f"   📄 Job Role: {bool(job_details['job_role'])}")
+            logger.info(f"   📄 Job Description: {bool(job_details['description'])}")
+            logger.info(f"   📄 Job Link (url): {bool(job_details['url'])}")
             
             # If no job details found, try alternative extraction
             if not job_details['title'] and not job_details['description']:
