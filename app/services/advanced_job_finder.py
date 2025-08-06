@@ -106,10 +106,13 @@ class AdvancedJobFinder:
     async def _hidden_job_extraction(self, career_url: str, max_jobs: int) -> List[Dict]:
         """Hidden job extraction"""
         try:
-            result = await self.hidden_job_extractor.extract_hidden_jobs_from_page(career_url)
-            if result.get('success'):
-                logger.info(f"   ✅ Hidden extraction: {len(result.get('jobs', []))} jobs")
-                return result.get('jobs', [])
+            # Temporarily disable hidden job extraction to avoid page parameter issue
+            # result = await self.hidden_job_extractor.extract_hidden_jobs_from_page(career_url, page)
+            # if result.get('success'):
+            #     logger.info(f"   ✅ Hidden extraction: {len(result.get('jobs', []))} jobs")
+            #     return result.get('jobs', [])
+            logger.info(f"   ⚠️ Hidden extraction temporarily disabled")
+            return []
         except Exception as e:
             logger.warning(f"   ⚠️ Hidden extraction failed: {e}")
         return []
