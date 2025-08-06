@@ -690,19 +690,6 @@ class JobExtractionService:
                         job_details['description'] = desc_text[:2000]
                         break
             
-            # Enhanced company extraction
-            company_selectors = [
-                '.company-name', '.employer', '.organization', '.brand',
-                '[data-company]', '[data-employer]', '.logo-text'
-            ]
-            for selector in company_selectors:
-                company_element = soup.select_one(selector)
-                if company_element:
-                    company_text = company_element.get_text().strip()
-                    if company_text and len(company_text) > 2:
-                        job_details['company'] = company_text
-                        break
-            
             # Company info is already in Wehappi company details, so we skip it here
             
             # Set job_role same as title for Wehappi
@@ -723,12 +710,6 @@ class JobExtractionService:
                 alternative_job = await self._extract_job_alternative_methods(soup, job_url)
                 if alternative_job:
                     job_details.update(alternative_job)
-            
-            # Extract salary from description
-            if not job_details['salary']:
-                salary = self._extract_salary_from_description(job_details['description'])
-                if salary:
-                    job_details['salary'] = salary
             
             return job_details
             
@@ -768,7 +749,10 @@ class JobExtractionService:
                     if len(potential_title) > 5:
                         return {
                             'title': potential_title,
-                            'description': all_text[:1000] if len(all_text) > 100 else all_text
+                            'job_type': 'Full-time',
+                            'job_role': potential_title,
+                            'description': all_text[:1000] if len(all_text) > 100 else all_text,
+                            'url': job_url
                         }
             
             # Method 2: Look for any content in main areas
@@ -778,7 +762,10 @@ class JobExtractionService:
                 if len(main_text) > 100:
                     return {
                         'title': 'Job Opportunity',  # Generic title
-                        'description': main_text[:1000]
+                        'job_type': 'Full-time',
+                        'job_role': 'Job Opportunity',
+                        'description': main_text[:1000],
+                        'url': job_url
                     }
             
             return {}
