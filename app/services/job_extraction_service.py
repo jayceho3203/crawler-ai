@@ -481,21 +481,36 @@ class JobExtractionService:
         try:
             logger.info(f"🔗 Extracting job URLs from: {career_page_url}")
             
-            # Step 1: Try to extract jobs with URLs first
-            result = await self._extract_jobs_from_single_page(
-                career_page_url, max_jobs, include_hidden_jobs=True, include_job_details=False
-            )
+            # Step 1: Try to extract job URLs directly from career page (PRIORITY)
+            logger.info(f"   🔍 Step 1: Extracting job URLs directly from career page")
+            job_urls = await self._extract_job_urls_from_career_page(career_page_url)
             
-            if result['success']:
-                jobs = result.get('jobs', [])
+            if job_urls:
+                # Found job URLs - this is the preferred approach
+                has_individual_urls = True
+                total_jobs_found = len(job_urls)
+                logger.info(f"   ✅ Found {len(job_urls)} job URLs - using individual job pages")
+            else:
+                # No job URLs found, fallback to extracting jobs from career page
+                logger.info(f"   ⚠️ No job URLs found, falling back to career page extraction")
+                result = await self._extract_jobs_from_single_page(
+                    career_page_url, max_jobs, include_hidden_jobs=True, include_job_details=False
+                )
                 
-                # Step 2: Analyze job structure
-                analysis = self._analyze_job_structure(jobs, career_page_url)
-                
-                # Step 3: Determine if jobs have individual URLs
-                has_individual_urls = analysis['has_individual_urls']
-                job_urls = analysis['job_urls']
-                total_jobs_found = len(jobs)
+                if result['success']:
+                    jobs = result.get('jobs', [])
+                    
+                    # Analyze job structure
+                    analysis = self._analyze_job_structure(jobs, career_page_url)
+                    
+                    # Determine if jobs have individual URLs
+                    has_individual_urls = analysis['has_individual_urls']
+                    job_urls = analysis['job_urls']
+                    total_jobs_found = len(jobs)
+                else:
+                    has_individual_urls = False
+                    job_urls = []
+                    total_jobs_found = 0
                 
                 # Step 4: If no jobs found, try alternative methods
                 if total_jobs_found == 0:
@@ -537,16 +552,6 @@ class JobExtractionService:
                     response['job_urls'] = [career_page_url]
                 
                 return response
-            else:
-                return {
-                    'success': False,
-                    'career_page_url': career_page_url,
-                    'error_message': result.get('error_message', 'Failed to extract jobs'),
-                    'total_jobs_found': 0,
-                    'has_individual_urls': False,
-                    'crawl_time': (datetime.now() - start_time).total_seconds(),
-                    'crawl_method': 'scrapy_optimized'
-                }
                 
         except Exception as e:
             logger.error(f"❌ Error in job URL extraction: {e}")
@@ -760,6 +765,187 @@ class JobExtractionService:
         except Exception as e:
             logger.error(f"❌ Error in alternative job extraction: {e}")
             return {}
+    
+    async def _extract_job_urls_from_career_page(self, career_page_url: str) -> List[str]:
+        """Extract job URLs directly from career page HTML"""
+        try:
+            from bs4 import BeautifulSoup
+            from urllib.parse import urljoin
+            import re
+            
+            # Crawl career page
+            result = await crawl_single_url(career_page_url)
+            if not result['success']:
+                return []
+            
+            html_content = result['html']
+            soup = BeautifulSoup(html_content, 'html.parser')
+            
+            job_urls = []
+            
+            # Method 1: Look for job links with common patterns (generic, no .html)
+            job_link_patterns = [
+                r'/career/[^"]+',
+                r'/careers/[^"]+',
+                r'/jobs/[^"]+', 
+                r'/positions/[^"]+',
+                r'/opportunities/[^"]+',
+                r'/tuyen-dung/[^"]+',
+                r'/recruitment/[^"]+',
+                r'/vacancies/[^"]+',
+                r'/openings/[^"]+'
+            ]
+            
+            # Find all links
+            all_links = soup.find_all('a', href=True)
+            
+            for link in all_links:
+                href = link.get('href', '')
+                
+                # Check if href matches job patterns
+                for pattern in job_link_patterns:
+                    if re.search(pattern, href, re.IGNORECASE):
+                        full_url = urljoin(career_page_url, href)
+                        # Filter out the career page itself and ensure it's a job detail page
+                        if (full_url not in job_urls and 
+                            full_url != career_page_url and 
+                            not full_url.endswith('/career') and
+                            not full_url.endswith('/careers') and
+                            not full_url.endswith('/jobs') and
+                            not full_url.endswith('/positions')):
+                            job_urls.append(full_url)
+                            logger.info(f"   🔗 Found job URL: {full_url}")
+                
+                # Check if link text contains job-related keywords
+                link_text = link.get_text().strip().lower()
+                job_keywords = [
+                    # Job roles
+                    'developer', 'engineer', 'designer', 'manager', 'analyst', 'specialist',
+                    'coordinator', 'assistant', 'director', 'lead', 'head', 'chief',
+                    'architect', 'consultant', 'advisor', 'expert', 'professional',
+                    
+                    # Seniority levels
+                    'senior', 'junior', 'mid', 'entry', 'level', 'principal', 'staff',
+                    'associate', 'executive', 'vice', 'deputy',
+                    
+                    # Job types
+                    'full-time', 'part-time', 'contract', 'temporary', 'permanent',
+                    'remote', 'hybrid', 'onsite', 'freelance', 'internship',
+                    
+                    # Departments
+                    'software', 'frontend', 'backend', 'fullstack', 'mobile', 'web',
+                    'data', 'ai', 'ml', 'devops', 'qa', 'testing', 'product',
+                    'marketing', 'sales', 'hr', 'finance', 'legal', 'operations',
+                    
+                    # Technologies
+                    'python', 'java', 'javascript', 'react', 'vue', 'angular',
+                    'node', 'php', 'c#', 'dotnet', 'ruby', 'go', 'rust',
+                    'aws', 'azure', 'gcp', 'docker', 'kubernetes',
+                    
+                    # Vietnamese keywords
+                    'lập trình', 'phát triển', 'thiết kế', 'quản lý', 'phân tích',
+                    'chuyên viên', 'trưởng nhóm', 'giám đốc', 'thực tập', 'cộng tác viên'
+                ]
+                if any(keyword in link_text for keyword in job_keywords):
+                    full_url = urljoin(career_page_url, href)
+                    if full_url not in job_urls and full_url != career_page_url:
+                        job_urls.append(full_url)
+                        logger.info(f"   🔗 Found job URL by keyword: {full_url}")
+            
+            # Method 2: Look for job cards/sections
+            job_card_patterns = [
+                r'job', r'career', r'position', r'vacancy', r'opening', r'opportunity',
+                r'listing', r'posting', r'role', r'employment', r'work', r'hire',
+                r'candidate', r'applicant', r'resume', r'cv', r'application'
+            ]
+            job_cards = soup.find_all(['div', 'article', 'section', 'li'], 
+                                     class_=re.compile('|'.join(job_card_patterns), re.IGNORECASE))
+            for card in job_cards:
+                link = card.find('a', href=True)
+                if link:
+                    href = link.get('href')
+                    full_url = urljoin(career_page_url, href)
+                    if full_url not in job_urls and full_url != career_page_url:
+                        job_urls.append(full_url)
+                        logger.info(f"   🔗 Found job URL from card: {full_url}")
+            
+            # Method 3: Content-based job URL detection
+            if not job_urls:
+                logger.info(f"   🔍 No job URLs found with patterns, trying content analysis")
+                content_job_urls = self._detect_job_urls_by_content(soup, career_page_url)
+                job_urls.extend(content_job_urls)
+            
+            return job_urls
+            
+        except Exception as e:
+            logger.error(f"❌ Error extracting job URLs from career page: {e}")
+            return []
+    
+    def _detect_job_urls_by_content(self, soup, career_page_url: str) -> List[str]:
+        """Detect job URLs by analyzing link content and context"""
+        try:
+            from urllib.parse import urljoin
+            
+            job_urls = []
+            all_links = soup.find_all('a', href=True)
+            
+            for link in all_links:
+                href = link.get('href', '')
+                link_text = link.get_text().strip().lower()
+                
+                # Skip if it's the career page itself
+                full_url = urljoin(career_page_url, href)
+                if full_url == career_page_url:
+                    continue
+                
+                # Check if link text suggests it's a job
+                job_indicators = [
+                    # Action words
+                    'view', 'apply', 'details', 'read more', 'learn more', 'see more',
+                    'view job', 'apply now', 'view position', 'apply for', 'view details',
+                    'read full', 'learn about', 'see position', 'view opening',
+                    
+                    # Job roles (comprehensive)
+                    'developer', 'engineer', 'designer', 'manager', 'analyst', 'specialist',
+                    'coordinator', 'assistant', 'director', 'lead', 'head', 'chief',
+                    'architect', 'consultant', 'advisor', 'expert', 'professional',
+                    'programmer', 'coder', 'tester', 'qa', 'devops', 'sre',
+                    
+                    # Seniority levels
+                    'senior', 'junior', 'mid', 'entry', 'level', 'principal', 'staff',
+                    'associate', 'executive', 'vice', 'deputy', 'lead', 'head',
+                    
+                    # Job types
+                    'full-time', 'part-time', 'contract', 'temporary', 'permanent',
+                    'remote', 'hybrid', 'onsite', 'freelance', 'internship',
+                    
+                    # Departments
+                    'software', 'frontend', 'backend', 'fullstack', 'mobile', 'web',
+                    'data', 'ai', 'ml', 'devops', 'qa', 'testing', 'product',
+                    'marketing', 'sales', 'hr', 'finance', 'legal', 'operations',
+                    'research', 'development', 'engineering', 'technology',
+                    
+                    # Technologies
+                    'python', 'java', 'javascript', 'react', 'vue', 'angular',
+                    'node', 'php', 'c#', 'dotnet', 'ruby', 'go', 'rust',
+                    'aws', 'azure', 'gcp', 'docker', 'kubernetes',
+                    
+                    # Vietnamese keywords
+                    'lập trình', 'phát triển', 'thiết kế', 'quản lý', 'phân tích',
+                    'chuyên viên', 'trưởng nhóm', 'giám đốc', 'thực tập', 'cộng tác viên',
+                    'xem chi tiết', 'ứng tuyển', 'tìm hiểu thêm', 'xem thêm'
+                ]
+                
+                if any(indicator in link_text for indicator in job_indicators):
+                    if full_url not in job_urls:
+                        job_urls.append(full_url)
+                        logger.info(f"   🔗 Found job URL by content: {full_url} (text: {link_text})")
+            
+            return job_urls
+            
+        except Exception as e:
+            logger.error(f"❌ Error in content-based job URL detection: {e}")
+            return []
     
     def _analyze_job_structure(self, jobs: List[Dict], career_page_url: str) -> Dict:
         """Analyze job structure to determine extraction type"""
