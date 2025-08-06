@@ -746,3 +746,37 @@ async def crawl_single_url(url: str) -> Dict:
     cache_result(url, result)
     
     return result 
+
+async def crawl_website(url: str) -> List[Dict[str, str]]:
+    """
+    Crawl website and extract contact information (emails, social links, career pages)
+    Returns list of dictionaries with 'label' and 'value' keys
+    """
+    try:
+        # Use the existing extract_with_playwright function
+        result = await extract_with_playwright(url)
+        
+        # Extract emails from the result
+        emails = result.get('emails', [])
+        extracted_data = []
+        
+        # Add emails
+        for email in emails:
+            extracted_data.append({
+                'label': 'email',
+                'value': email
+            })
+        
+        # Add URLs (social links, career pages, etc.)
+        urls = result.get('urls', [])
+        for url_item in urls:
+            extracted_data.append({
+                'label': 'url',
+                'value': url_item
+            })
+        
+        return extracted_data
+        
+    except Exception as e:
+        logger.error(f"Error crawling website {url}: {e}")
+        return [] 

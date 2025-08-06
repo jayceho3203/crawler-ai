@@ -250,3 +250,27 @@ def process_extracted_crawl_results(
         'social_links': sorted(list(social_links)),
         'career_pages': sorted(list(career_pages))
     } 
+
+async def extract_contact_info_from_url(url: str) -> Dict[str, List[str]]:
+    """
+    Extract contact information from a company website URL
+    """
+    try:
+        # Import here to avoid circular imports
+        from app.services.crawler import crawl_website
+        
+        # Crawl the website to get raw data
+        raw_data = await crawl_website(url)
+        
+        # Process the extracted data
+        contact_info = process_extracted_crawl_results(raw_data, url)
+        
+        return contact_info
+        
+    except Exception as e:
+        print(f"Error extracting contact info from {url}: {e}")
+        return {
+            'emails': [],
+            'social_links': [],
+            'career_pages': []
+        } 
