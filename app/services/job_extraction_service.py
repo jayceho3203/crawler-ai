@@ -490,6 +490,26 @@ class JobExtractionService:
                 has_individual_urls = True
                 total_jobs_found = len(job_urls)
                 logger.info(f"   ✅ Found {len(job_urls)} job URLs - using individual job pages")
+                
+                crawl_time = (datetime.now() - start_time).total_seconds()
+                
+                logger.info(f"✅ Job URL extraction completed:")
+                logger.info(f"   📊 Total jobs found: {total_jobs_found}")
+                logger.info(f"   📊 Has individual URLs: {has_individual_urls}")
+                logger.info(f"   📊 Job URLs found: {len(job_urls)}")
+                
+                # Simplified response format for N8N workflow
+                response = {
+                    'success': True,
+                    'career_page_url': career_page_url,
+                    'total_jobs_found': total_jobs_found,
+                    'has_individual_urls': has_individual_urls,
+                    'job_urls': job_urls,
+                    'crawl_time': crawl_time,
+                    'crawl_method': 'scrapy_optimized'
+                }
+                
+                return response
             else:
                 # No job URLs found, fallback to extracting jobs from career page
                 logger.info(f"   ⚠️ No job URLs found, falling back to career page extraction")
