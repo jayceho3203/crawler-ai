@@ -472,81 +472,63 @@ class JobExtractionService:
     
     async def extract_job_urls_only(self, career_page_url: str, max_jobs: int = 50, include_job_data: bool = False) -> Dict:
         """
-        Smart job extraction - handle all possible cases
+        Extract job URLs from career page - simplified output for N8N workflow
         """
         start_time = datetime.now()
         
         try:
-            logger.info(f"🔗 Smart job extraction from: {career_page_url}")
+            logger.info(f"🔗 Extracting job URLs from: {career_page_url}")
             
             # Step 1: Try to extract jobs with URLs first
             result = await self._extract_jobs_from_single_page(
-                career_page_url, max_jobs, include_hidden_jobs=True, include_job_details=include_job_data
+                career_page_url, max_jobs, include_hidden_jobs=True, include_job_details=False
             )
             
             if result['success']:
                 jobs = result.get('jobs', [])
-                job_urls = []
-                has_individual_urls = False
-                extraction_type = "unknown"
                 
                 # Step 2: Analyze job structure
                 analysis = self._analyze_job_structure(jobs, career_page_url)
                 
-                # Step 3: Handle different cases
-                if analysis['has_individual_urls']:
-                    # Case 1: Jobs have individual URLs
-                    extraction_type = "urls_only"
-                    job_urls = analysis['job_urls']
-                    has_individual_urls = True
-                    logger.info(f"   📊 Case: Jobs with individual URLs ({len(job_urls)} found)")
-                    
-                elif analysis['has_job_data']:
-                    # Case 2: Jobs displayed directly on page
-                    extraction_type = "data_only"
-                    has_individual_urls = False
-                    logger.info(f"   📊 Case: Jobs displayed directly on page ({len(jobs)} found)")
-                    
-                else:
-                    # Case 3: No jobs found, try alternative methods
-                    logger.info(f"   📊 Case: No jobs found, trying alternative methods")
+                # Step 3: Determine if jobs have individual URLs
+                has_individual_urls = analysis['has_individual_urls']
+                job_urls = analysis['job_urls']
+                total_jobs_found = len(jobs)
+                
+                # Step 4: If no jobs found, try alternative methods
+                if total_jobs_found == 0:
+                    logger.info(f"   📊 No jobs found, trying alternative methods")
                     alternative_result = await self._try_alternative_extraction_methods(career_page_url, max_jobs)
                     
                     if alternative_result['success']:
                         jobs = alternative_result['jobs']
-                        extraction_type = alternative_result['extraction_type']
                         has_individual_urls = alternative_result['has_individual_urls']
-                        logger.info(f"   📊 Alternative method successful: {extraction_type}")
+                        job_urls = alternative_result.get('job_urls', [])
+                        total_jobs_found = len(jobs)
+                        logger.info(f"   📊 Alternative method successful: {alternative_result['extraction_type']}")
                     else:
-                        extraction_type = "no_jobs_found"
                         logger.warning(f"   📊 No jobs found with any method")
                 
                 crawl_time = (datetime.now() - start_time).total_seconds()
                 
-                logger.info(f"✅ Smart extraction completed:")
-                logger.info(f"   📊 Total jobs found: {len(jobs)}")
-                logger.info(f"   📊 Extraction type: {extraction_type}")
+                logger.info(f"✅ Job URL extraction completed:")
+                logger.info(f"   📊 Total jobs found: {total_jobs_found}")
                 logger.info(f"   📊 Has individual URLs: {has_individual_urls}")
+                logger.info(f"   📊 Job URLs found: {len(job_urls)}")
                 
+                # Simplified response format for N8N workflow
                 response = {
                     'success': True,
                     'career_page_url': career_page_url,
-                    'extraction_type': extraction_type,
-                    'total_jobs_found': len(jobs),
+                    'total_jobs_found': total_jobs_found,
                     'has_individual_urls': has_individual_urls,
                     'crawl_time': crawl_time,
-                    'crawl_method': 'scrapy_optimized',
-                    'analysis': analysis
+                    'crawl_method': 'scrapy_optimized'
                 }
                 
-                if include_job_data or extraction_type in ["data_only", "mixed"]:
-                    # Return job data
-                    response['jobs'] = jobs
-                
-                if extraction_type in ["urls_only", "mixed"]:
-                    # Return job URLs
+                # Only include job_urls if jobs have individual URLs
+                if has_individual_urls and job_urls:
                     response['job_urls'] = job_urls
-                    response['total_job_urls_found'] = len(job_urls)
                 
                 return response
             else:
@@ -554,10 +536,6 @@ class JobExtractionService:
                     'success': False,
                     'career_page_url': career_page_url,
                     'error_message': result.get('error_message', 'Failed to extract jobs'),
-                    'extraction_type': 'failed',
-                    'job_urls': [],
-                    'jobs': [],
-                    'total_job_urls_found': 0,
                     'total_jobs_found': 0,
                     'has_individual_urls': False,
                     'crawl_time': (datetime.now() - start_time).total_seconds(),
@@ -565,15 +543,11 @@ class JobExtractionService:
                 }
                 
         except Exception as e:
-            logger.error(f"❌ Error in smart job extraction: {e}")
+            logger.error(f"❌ Error in job URL extraction: {e}")
             return {
                 'success': False,
                 'career_page_url': career_page_url,
                 'error_message': str(e),
-                'extraction_type': 'error',
-                'job_urls': [],
-                'jobs': [],
-                'total_job_urls_found': 0,
                 'total_jobs_found': 0,
                 'has_individual_urls': False,
                 'crawl_time': (datetime.now() - start_time).total_seconds(),
