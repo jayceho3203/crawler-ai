@@ -528,9 +528,13 @@ class JobExtractionService:
                     'crawl_method': 'scrapy_optimized'
                 }
                 
-                # Only include job_urls if jobs have individual URLs
+                # Always include job_urls for N8N workflow
                 if has_individual_urls and job_urls:
+                    # Jobs have individual URLs
                     response['job_urls'] = job_urls
+                else:
+                    # Jobs don't have individual URLs, use career page URL
+                    response['job_urls'] = [career_page_url]
                 
                 return response
             else:

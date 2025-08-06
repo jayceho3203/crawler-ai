@@ -97,10 +97,6 @@ async def extract_with_playwright(url: str) -> Dict:
             # Extract HTML content
             html_content = await page.content()
             
-            # Close browser to free memory
-            await context.close()
-            await browser.close()
-            
             # Extract emails using regex
             email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
             emails = re.findall(email_pattern, html_content)
@@ -201,6 +197,10 @@ async def extract_with_playwright(url: str) -> Dict:
                 formatted_jobs = {"jobs": [], "total_count": 0}
                 job_summary = {"total_jobs": 0, "job_types": {}, "locations": {}}
             
+            # Close browser to free memory
+            await context.close()
+            await browser.close()
+            
             return {
                 "success": True,
                 "status_code": response.status if response else 200,
@@ -225,6 +225,16 @@ async def extract_with_playwright(url: str) -> Dict:
     except Exception as e:
         crawl_time = time.time() - start_time
         logger.error(f"❌ Playwright failed for {url}: {str(e)}")
+        
+        # Ensure browser is closed even on error
+        try:
+            if 'context' in locals():
+                await context.close()
+            if 'browser' in locals():
+                await browser.close()
+        except:
+            pass
+            
         return {
             "success": False,
             "error_message": str(e),
