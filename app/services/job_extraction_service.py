@@ -832,7 +832,15 @@ class JobExtractionService:
                             not full_url.endswith('/career') and
                             not full_url.endswith('/careers') and
                             not full_url.endswith('/jobs') and
-                            not full_url.endswith('/positions')):
+                            not full_url.endswith('/positions') and
+                            # Filter out AJAX load URLs
+                            not '/load/' in full_url and
+                            # Filter out product pages
+                            not '/product' in full_url and
+                            # Filter out hash fragments
+                            not '#' in full_url and
+                            # Must contain job-related keywords in URL
+                            any(keyword in full_url.lower() for keyword in ['developer', 'engineer', 'designer', 'manager', 'analyst', 'senior', 'junior', 'c-sharp', 'dotnet', 'java', 'python', 'react', 'vue', 'angular'])):
                             job_urls.append(full_url)
                             logger.info(f"   🔗 Found job URL: {full_url}")
                 
@@ -895,11 +903,65 @@ class JobExtractionService:
                 content_job_urls = self._detect_job_urls_by_content(soup, career_page_url)
                 job_urls.extend(content_job_urls)
             
-            return job_urls
+            # Filter and validate job URLs
+            validated_job_urls = self._validate_job_urls(job_urls, career_page_url)
+            
+            return validated_job_urls
             
         except Exception as e:
             logger.error(f"❌ Error extracting job URLs from career page: {e}")
             return []
+    
+    def _validate_job_urls(self, job_urls: List[str], career_page_url: str) -> List[str]:
+        """Validate and filter job URLs to ensure they are actual job detail pages"""
+        try:
+            validated_urls = []
+            
+            for url in job_urls:
+                # Skip if it's the career page itself
+                if url == career_page_url:
+                    continue
+                
+                # Skip AJAX load URLs
+                if '/load/' in url:
+                    logger.info(f"   ⚠️ Skipping AJAX load URL: {url}")
+                    continue
+                
+                # Skip product pages
+                if '/product' in url:
+                    logger.info(f"   ⚠️ Skipping product page: {url}")
+                    continue
+                
+                # Skip hash fragments
+                if '#' in url:
+                    logger.info(f"   ⚠️ Skipping hash fragment URL: {url}")
+                    continue
+                
+                # Skip generic career pages
+                if any(url.endswith(suffix) for suffix in ['/career', '/careers', '/jobs', '/positions']):
+                    logger.info(f"   ⚠️ Skipping generic career page: {url}")
+                    continue
+                
+                # Must contain job-related keywords in URL
+                job_keywords = [
+                    'developer', 'engineer', 'designer', 'manager', 'analyst', 
+                    'senior', 'junior', 'lead', 'head', 'chief', 'architect',
+                    'c-sharp', 'dotnet', 'java', 'python', 'react', 'vue', 'angular',
+                    'frontend', 'backend', 'fullstack', 'mobile', 'web', 'data',
+                    'ai', 'ml', 'devops', 'qa', 'testing', 'product'
+                ]
+                
+                if any(keyword in url.lower() for keyword in job_keywords):
+                    validated_urls.append(url)
+                    logger.info(f"   ✅ Validated job URL: {url}")
+                else:
+                    logger.info(f"   ⚠️ Skipping non-job URL: {url}")
+            
+            return validated_urls
+            
+        except Exception as e:
+            logger.error(f"❌ Error validating job URLs: {e}")
+            return job_urls  # Return original if validation fails
     
     def _detect_job_urls_by_content(self, soup, career_page_url: str) -> List[str]:
         """Detect job URLs by analyzing link content and context"""
