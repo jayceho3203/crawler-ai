@@ -845,12 +845,603 @@ class JobExtractionService:
             return []
     
     async def _extract_jobs_from_javascript(self, career_page_url: str) -> List[Dict]:
-        """Extract jobs from JavaScript data (basic implementation)"""
+        """Extract jobs from JavaScript data using Playwright"""
         try:
-            # This would require more sophisticated JavaScript execution
-            # For now, return empty list
-            return []
+            from playwright.async_api import async_playwright
+            
+            jobs = []
+            
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(headless=True)
+                page = await browser.new_page()
+                
+                try:
+                    await page.goto(career_page_url, wait_until='networkidle')
+                    
+                    # Wait for potential dynamic content
+                    await page.wait_for_timeout(3000)
+                    
+                    # Method 1: Extract from JavaScript variables
+                    js_jobs = await page.evaluate("""
+                        () => {
+                            const jobs = [];
+                            
+                            // Look for common job data variables
+                            const possibleVars = [
+                                'jobs', 'jobList', 'careers', 'positions', 'openings',
+                                'jobData', 'careerData', 'positionData'
+                            ];
+                            
+                            for (const varName of possibleVars) {
+                                if (window[varName] && Array.isArray(window[varName])) {
+                                    return window[varName];
+                                }
+                            }
+                            
+                            // Look for data attributes
+                            const jobElements = document.querySelectorAll('[data-job], [data-career], [data-position]');
+                            for (const element of jobElements) {
+                                const jobData = element.dataset;
+                                if (jobData.title || jobData.name) {
+                                    jobs.push({
+                                        title: jobData.title || jobData.name,
+                                        company: jobData.company || '',
+                                        location: jobData.location || '',
+                                        description: jobData.description || '',
+                                        url: jobData.url || window.location.href
+                                    });
+                                }
+                            }
+                            
+                            return jobs;
+                        }
+                    """)
+                    
+                    if js_jobs and len(js_jobs) > 0:
+                        logger.info(f"   📊 Found {len(js_jobs)} jobs from JavaScript variables")
+                        for job in js_jobs:
+                            jobs.append({
+                                'title': job.get('title', ''),
+                                'company': job.get('company', ''),
+                                'location': job.get('location', ''),
+                                'job_type': job.get('job_type', 'Full-time'),
+                                'salary': job.get('salary', ''),
+                                'posted_date': job.get('posted_date', ''),
+                                'url': job.get('url', career_page_url),
+                                'description': job.get('description', ''),
+                                'requirements': job.get('requirements', ''),
+                                'benefits': job.get('benefits', '')
+                            })
+                    
+                    # Method 2: Handle accordions/tabs
+                    accordion_jobs = await self._extract_jobs_from_accordions(page)
+                    jobs.extend(accordion_jobs)
+                    
+                    # Method 3: Handle modals
+                    modal_jobs = await self._extract_jobs_from_modals(page)
+                    jobs.extend(modal_jobs)
+                    
+                    # Method 4: Handle AJAX loading
+                    ajax_jobs = await self._extract_jobs_from_ajax(page)
+                    jobs.extend(ajax_jobs)
+                    
+                    # Method 5: Handle iframes
+                    iframe_jobs = await self._extract_jobs_from_iframes(page)
+                    jobs.extend(iframe_jobs)
+                    
+                    # Method 6: Handle shadow DOM
+                    shadow_jobs = await self._extract_jobs_from_shadow_dom(page)
+                    jobs.extend(shadow_jobs)
+                    
+                finally:
+                    await browser.close()
+            
+            return jobs
             
         except Exception as e:
             logger.error(f"Error extracting jobs from JavaScript: {e}")
+            return []
+    
+    def _extract_job_from_element(self, element, base_url: str) -> Dict:
+        """Extract job data from a single HTML element"""
+        try:
+            from bs4 import BeautifulSoup
+            
+            # Common selectors for job data
+            selectors = {
+                'title': [
+                    'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+                    '.job-title', '.position-title', '.career-title',
+                    '[class*="title"]', '[class*="name"]'
+                ],
+                'company': [
+                    '.company', '.company-name', '.employer',
+                    '[class*="company"]', '[class*="employer"]'
+                ],
+                'location': [
+                    '.location', '.job-location', '.position-location',
+                    '[class*="location"]', '[class*="place"]'
+                ],
+                'salary': [
+                    '.salary', '.compensation', '.pay',
+                    '[class*="salary"]', '[class*="pay"]'
+                ],
+                'description': [
+                    '.description', '.job-description', '.position-description',
+                    '.summary', '.details', '[class*="description"]'
+                ],
+                'job_type': [
+                    '.job-type', '.employment-type', '.position-type',
+                    '[class*="type"]', '[class*="employment"]'
+                ],
+                'posted_date': [
+                    '.posted-date', '.date-posted', '.published-date',
+                    '[class*="date"]', '[class*="posted"]'
+                ]
+            }
+            
+            job_data = {
+                'title': '',
+                'company': '',
+                'location': '',
+                'job_type': 'Full-time',
+                'salary': '',
+                'posted_date': '',
+                'url': base_url,  # Use base URL since no individual URL
+                'description': '',
+                'requirements': '',
+                'benefits': ''
+            }
+            
+            # Extract data using selectors
+            for field, field_selectors in selectors.items():
+                for selector in field_selectors:
+                    found_element = element.select_one(selector)
+                    if found_element:
+                        text = found_element.get_text(strip=True)
+                        if text:
+                            job_data[field] = text
+                            break
+            
+            # If no title found, try to get text from the element itself
+            if not job_data['title']:
+                # Look for any heading or strong text
+                title_element = element.find(['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'strong', 'b'])
+                if title_element:
+                    job_data['title'] = title_element.get_text(strip=True)
+                else:
+                    # Use first line of text as title
+                    text_lines = element.get_text().split('\n')
+                    for line in text_lines:
+                        line = line.strip()
+                        if line and len(line) > 10:  # Reasonable title length
+                            job_data['title'] = line
+                            break
+            
+            # Extract description from remaining text
+            if not job_data['description']:
+                full_text = element.get_text()
+                if full_text and len(full_text) > 50:  # Reasonable description length
+                    job_data['description'] = full_text[:500]  # Limit to 500 chars
+            
+            return job_data
+            
+        except Exception as e:
+            logger.error(f"Error extracting job from element: {e}")
+            return {
+                'title': '',
+                'company': '',
+                'location': '',
+                'job_type': 'Full-time',
+                'salary': '',
+                'posted_date': '',
+                'url': base_url,
+                'description': '',
+                'requirements': '',
+                'benefits': ''
+            }
+    
+    async def _extract_jobs_from_accordions(self, page) -> List[Dict]:
+        """Extract jobs from accordions/tabs by clicking to expand"""
+        try:
+            jobs = []
+            
+            # Common accordion selectors
+            accordion_selectors = [
+                '.accordion', '.accordion-item', '.collapsible', '.expandable',
+                '.tab-content', '.tab-pane', '.collapse', '.panel',
+                '[class*="accordion"]', '[class*="collapse"]', '[class*="expand"]'
+            ]
+            
+            for selector in accordion_selectors:
+                accordion_elements = await page.query_selector_all(selector)
+                if accordion_elements:
+                    logger.info(f"   📊 Found {len(accordion_elements)} accordion elements with selector: {selector}")
+                    
+                    for element in accordion_elements[:10]:  # Limit to 10 accordions
+                        try:
+                            # Click to expand
+                            await element.click()
+                            await page.wait_for_timeout(1000)  # Wait for content to load
+                            
+                            # Extract job data from expanded content
+                            job_data = await page.evaluate("""
+                                (element) => {
+                                    const job = {
+                                        title: '',
+                                        company: '',
+                                        location: '',
+                                        description: '',
+                                        url: window.location.href
+                                    };
+                                    
+                                    // Look for job title
+                                    const titleEl = element.querySelector('h1, h2, h3, h4, h5, h6, .title, .job-title');
+                                    if (titleEl) job.title = titleEl.textContent.trim();
+                                    
+                                    // Look for company
+                                    const companyEl = element.querySelector('.company, .employer, [class*="company"]');
+                                    if (companyEl) job.company = companyEl.textContent.trim();
+                                    
+                                    // Look for location
+                                    const locationEl = element.querySelector('.location, .place, [class*="location"]');
+                                    if (locationEl) job.location = locationEl.textContent.trim();
+                                    
+                                    // Look for description
+                                    const descEl = element.querySelector('.description, .content, .details, p');
+                                    if (descEl) job.description = descEl.textContent.trim();
+                                    
+                                    return job;
+                                }
+                            """, element)
+                            
+                            if job_data.get('title'):
+                                jobs.append({
+                                    'title': job_data.get('title', ''),
+                                    'company': job_data.get('company', ''),
+                                    'location': job_data.get('location', ''),
+                                    'job_type': 'Full-time',
+                                    'salary': '',
+                                    'posted_date': '',
+                                    'url': job_data.get('url', ''),
+                                    'description': job_data.get('description', ''),
+                                    'requirements': '',
+                                    'benefits': ''
+                                })
+                            
+                            # Close accordion
+                            await element.click()
+                            await page.wait_for_timeout(500)
+                            
+                        except Exception as e:
+                            logger.error(f"Error processing accordion element: {e}")
+                            continue
+                    
+                    if jobs:
+                        break
+            
+            return jobs
+            
+        except Exception as e:
+            logger.error(f"Error extracting jobs from accordions: {e}")
+            return []
+    
+    async def _extract_jobs_from_modals(self, page) -> List[Dict]:
+        """Extract jobs from modals/popups"""
+        try:
+            jobs = []
+            
+            # Common modal selectors
+            modal_selectors = [
+                '.modal', '.popup', '.dialog', '.overlay',
+                '[class*="modal"]', '[class*="popup"]', '[class*="dialog"]'
+            ]
+            
+            # Find modal triggers
+            trigger_selectors = [
+                '.job-card', '.career-card', '.position-card',
+                '[class*="job"]', '[class*="career"]', '[class*="position"]'
+            ]
+            
+            for trigger_selector in trigger_selectors:
+                triggers = await page.query_selector_all(trigger_selector)
+                if triggers:
+                    logger.info(f"   📊 Found {len(triggers)} modal triggers with selector: {trigger_selector}")
+                    
+                    for trigger in triggers[:5]:  # Limit to 5 modals
+                        try:
+                            # Click to open modal
+                            await trigger.click()
+                            await page.wait_for_timeout(2000)  # Wait for modal to open
+                            
+                            # Extract from modal content
+                            modal_job = await page.evaluate("""
+                                () => {
+                                    const modal = document.querySelector('.modal, .popup, .dialog, [class*="modal"]');
+                                    if (!modal) return null;
+                                    
+                                    const job = {
+                                        title: '',
+                                        company: '',
+                                        location: '',
+                                        description: '',
+                                        url: window.location.href
+                                    };
+                                    
+                                    // Extract job data from modal
+                                    const titleEl = modal.querySelector('h1, h2, h3, .title, .job-title');
+                                    if (titleEl) job.title = titleEl.textContent.trim();
+                                    
+                                    const companyEl = modal.querySelector('.company, .employer');
+                                    if (companyEl) job.company = companyEl.textContent.trim();
+                                    
+                                    const locationEl = modal.querySelector('.location, .place');
+                                    if (locationEl) job.location = locationEl.textContent.trim();
+                                    
+                                    const descEl = modal.querySelector('.description, .content, .details');
+                                    if (descEl) job.description = descEl.textContent.trim();
+                                    
+                                    return job;
+                                }
+                            """)
+                            
+                            if modal_job and modal_job.get('title'):
+                                jobs.append({
+                                    'title': modal_job.get('title', ''),
+                                    'company': modal_job.get('company', ''),
+                                    'location': modal_job.get('location', ''),
+                                    'job_type': 'Full-time',
+                                    'salary': '',
+                                    'posted_date': '',
+                                    'url': modal_job.get('url', ''),
+                                    'description': modal_job.get('description', ''),
+                                    'requirements': '',
+                                    'benefits': ''
+                                })
+                            
+                            # Close modal
+                            close_button = await page.query_selector('.close, .modal-close, [aria-label="Close"]')
+                            if close_button:
+                                await close_button.click()
+                            else:
+                                # Press Escape key
+                                await page.keyboard.press('Escape')
+                            
+                            await page.wait_for_timeout(1000)
+                            
+                        except Exception as e:
+                            logger.error(f"Error processing modal: {e}")
+                            continue
+                    
+                    if jobs:
+                        break
+            
+            return jobs
+            
+        except Exception as e:
+            logger.error(f"Error extracting jobs from modals: {e}")
+            return []
+    
+    async def _extract_jobs_from_ajax(self, page) -> List[Dict]:
+        """Extract jobs from AJAX-loaded content"""
+        try:
+            jobs = []
+            
+            # Look for "Load More" buttons
+            load_more_selectors = [
+                '.load-more', '.load-more-btn', '.show-more',
+                '[class*="load"]', '[class*="more"]', 'button:contains("Load More")'
+            ]
+            
+            for selector in load_more_selectors:
+                load_more_btn = await page.query_selector(selector)
+                if load_more_btn:
+                    logger.info(f"   📊 Found Load More button: {selector}")
+                    
+                    # Click Load More multiple times
+                    for i in range(3):  # Try to load 3 more pages
+                        try:
+                            await load_more_btn.click()
+                            await page.wait_for_timeout(2000)  # Wait for content to load
+                            
+                            # Extract newly loaded jobs
+                            new_jobs = await page.evaluate("""
+                                () => {
+                                    const jobs = [];
+                                    const jobElements = document.querySelectorAll('.job-card, .career-card, .position-card, [class*="job"]');
+                                    
+                                    for (const element of jobElements) {
+                                        const job = {
+                                            title: '',
+                                            company: '',
+                                            location: '',
+                                            description: '',
+                                            url: window.location.href
+                                        };
+                                        
+                                        const titleEl = element.querySelector('h1, h2, h3, .title, .job-title');
+                                        if (titleEl) job.title = titleEl.textContent.trim();
+                                        
+                                        const companyEl = element.querySelector('.company, .employer');
+                                        if (companyEl) job.company = companyEl.textContent.trim();
+                                        
+                                        const locationEl = element.querySelector('.location, .place');
+                                        if (locationEl) job.location = locationEl.textContent.trim();
+                                        
+                                        const descEl = element.querySelector('.description, .content');
+                                        if (descEl) job.description = descEl.textContent.trim();
+                                        
+                                        if (job.title) jobs.push(job);
+                                    }
+                                    
+                                    return jobs;
+                                }
+                            """)
+                            
+                            for job_data in new_jobs:
+                                if job_data.get('title') and not any(j.get('title') == job_data.get('title') for j in jobs):
+                                    jobs.append({
+                                        'title': job_data.get('title', ''),
+                                        'company': job_data.get('company', ''),
+                                        'location': job_data.get('location', ''),
+                                        'job_type': 'Full-time',
+                                        'salary': '',
+                                        'posted_date': '',
+                                        'url': job_data.get('url', ''),
+                                        'description': job_data.get('description', ''),
+                                        'requirements': '',
+                                        'benefits': ''
+                                    })
+                            
+                        except Exception as e:
+                            logger.error(f"Error loading more content: {e}")
+                            break
+            
+            return jobs
+            
+        except Exception as e:
+            logger.error(f"Error extracting jobs from AJAX: {e}")
+            return []
+    
+    async def _extract_jobs_from_iframes(self, page) -> List[Dict]:
+        """Extract jobs from iframes"""
+        try:
+            jobs = []
+            
+            # Find all iframes
+            iframes = await page.query_selector_all('iframe')
+            
+            for iframe in iframes:
+                try:
+                    # Get iframe content
+                    iframe_content = await page.evaluate("""
+                        (iframe) => {
+                            try {
+                                const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+                                if (!iframeDoc) return null;
+                                
+                                const jobs = [];
+                                const jobElements = iframeDoc.querySelectorAll('.job-card, .career-card, .position-card, [class*="job"]');
+                                
+                                for (const element of jobElements) {
+                                    const job = {
+                                        title: '',
+                                        company: '',
+                                        location: '',
+                                        description: '',
+                                        url: iframe.src || window.location.href
+                                    };
+                                    
+                                    const titleEl = element.querySelector('h1, h2, h3, .title, .job-title');
+                                    if (titleEl) job.title = titleEl.textContent.trim();
+                                    
+                                    const companyEl = element.querySelector('.company, .employer');
+                                    if (companyEl) job.company = companyEl.textContent.trim();
+                                    
+                                    const locationEl = element.querySelector('.location, .place');
+                                    if (locationEl) job.location = locationEl.textContent.trim();
+                                    
+                                    const descEl = element.querySelector('.description, .content');
+                                    if (descEl) job.description = descEl.textContent.trim();
+                                    
+                                    if (job.title) jobs.push(job);
+                                }
+                                
+                                return jobs;
+                            } catch (e) {
+                                return null;
+                            }
+                        }
+                    """, iframe)
+                    
+                    if iframe_content:
+                        for job_data in iframe_content:
+                            jobs.append({
+                                'title': job_data.get('title', ''),
+                                'company': job_data.get('company', ''),
+                                'location': job_data.get('location', ''),
+                                'job_type': 'Full-time',
+                                'salary': '',
+                                'posted_date': '',
+                                'url': job_data.get('url', ''),
+                                'description': job_data.get('description', ''),
+                                'requirements': '',
+                                'benefits': ''
+                            })
+                
+                except Exception as e:
+                    logger.error(f"Error processing iframe: {e}")
+                    continue
+            
+            return jobs
+            
+        except Exception as e:
+            logger.error(f"Error extracting jobs from iframes: {e}")
+            return []
+    
+    async def _extract_jobs_from_shadow_dom(self, page) -> List[Dict]:
+        """Extract jobs from Shadow DOM"""
+        try:
+            jobs = []
+            
+            # Find elements with shadow roots
+            shadow_jobs = await page.evaluate("""
+                () => {
+                    const jobs = [];
+                    
+                    // Find all elements that might have shadow roots
+                    const elements = document.querySelectorAll('*');
+                    
+                    for (const element of elements) {
+                        if (element.shadowRoot) {
+                            const shadowJobs = element.shadowRoot.querySelectorAll('.job-card, .career-card, .position-card, [class*="job"]');
+                            
+                            for (const jobElement of shadowJobs) {
+                                const job = {
+                                    title: '',
+                                    company: '',
+                                    location: '',
+                                    description: '',
+                                    url: window.location.href
+                                };
+                                
+                                const titleEl = jobElement.querySelector('h1, h2, h3, .title, .job-title');
+                                if (titleEl) job.title = titleEl.textContent.trim();
+                                
+                                const companyEl = jobElement.querySelector('.company, .employer');
+                                if (companyEl) job.company = companyEl.textContent.trim();
+                                
+                                const locationEl = jobElement.querySelector('.location, .place');
+                                if (locationEl) job.location = locationEl.textContent.trim();
+                                
+                                const descEl = jobElement.querySelector('.description, .content');
+                                if (descEl) job.description = descEl.textContent.trim();
+                                
+                                if (job.title) jobs.push(job);
+                            }
+                        }
+                    }
+                    
+                    return jobs;
+                }
+            """)
+            
+            for job_data in shadow_jobs:
+                jobs.append({
+                    'title': job_data.get('title', ''),
+                    'company': job_data.get('company', ''),
+                    'location': job_data.get('location', ''),
+                    'job_type': 'Full-time',
+                    'salary': '',
+                    'posted_date': '',
+                    'url': job_data.get('url', ''),
+                    'description': job_data.get('description', ''),
+                    'requirements': '',
+                    'benefits': ''
+                })
+            
+            return jobs
+            
+        except Exception as e:
+            logger.error(f"Error extracting jobs from shadow DOM: {e}")
             return []
