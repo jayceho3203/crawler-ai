@@ -70,31 +70,47 @@ class OptimizedCareerSpider(scrapy.Spider):
         """
         Parse homepage với focus vào navigation
         """
-        self.crawled_pages += 1
         logger.info(f"📄 Crawling homepage: {response.url}")
         
         # Tìm tất cả links trên homepage
         all_links = self.extract_all_links(response)
+        logger.info(f"🔗 Found {len(all_links)} links on homepage")
         
         # Phân loại và ưu tiên links
         prioritized_links = self.prioritize_links(all_links, response.url)
+        logger.info(f"📊 Prioritized links: {len(prioritized_links)} categories")
         
         # Crawl theo priority
+        should_break = False
         for priority, links in prioritized_links.items():
+            if should_break:
+                break
+                
+            logger.info(f"🎯 Processing priority {priority} with {len(links)} links")
             for link in links:
                 if self.crawled_pages >= self.max_pages:
+                    logger.info(f"⏹️ Reached max pages limit: {self.max_pages}")
+                    should_break = True
                     break
                     
                 full_url = urljoin(response.url, link)
+                logger.info(f"🔗 Processing link: {link} -> {full_url}")
                 
                 # Chỉ crawl cùng domain
                 if urlparse(full_url).netloc == self.domain:
+                    logger.info(f"✅ Adding to crawl queue: {full_url}")
                     yield scrapy.Request(
                         url=full_url,
                         callback=self.parse_page,
                         priority=priority,
                         meta={'depth': 1, 'priority': priority}
                     )
+                else:
+                    logger.info(f"❌ Skipping external link: {full_url}")
+        
+        # Tăng crawled_pages sau khi đã yield tất cả requests
+        self.crawled_pages += 1
+        logger.info(f"📊 Homepage processing complete. Crawled pages: {self.crawled_pages}")
     
     def extract_all_links(self, response) -> List[str]:
         """
@@ -125,9 +141,18 @@ class OptimizedCareerSpider(scrapy.Spider):
         all_links = response.css('a::attr(href)').getall()
         links.extend(all_links)
         
+        logger.info(f"🔍 Raw links found: {len(links)}")
+        
         # Remove duplicates và filter
         unique_links = list(set(links))
+        logger.info(f"🔍 Unique links: {len(unique_links)}")
+        
         filtered_links = [link for link in unique_links if self.is_valid_link(link)]
+        logger.info(f"🔍 Valid links: {len(filtered_links)}")
+        
+        # Log first 10 links for debugging
+        if filtered_links:
+            logger.info(f"🔍 Sample links: {filtered_links[:10]}")
         
         return filtered_links
     
@@ -225,10 +250,9 @@ class OptimizedCareerSpider(scrapy.Spider):
         """
         Parse từng trang với detection tối ưu
         """
-        self.crawled_pages += 1
         priority = response.meta.get('priority', 10)
         
-        logger.info(f"📄 Crawling page {self.crawled_pages}/{self.max_pages}: {response.url} (priority: {priority})")
+        logger.info(f"📄 Crawling page {self.crawled_pages + 1}/{self.max_pages}: {response.url} (priority: {priority})")
         
         # Kiểm tra có phải career page không
         career_score = self.calculate_career_score(response)
@@ -247,8 +271,12 @@ class OptimizedCareerSpider(scrapy.Spider):
             
             logger.info(f"🎯 Career page found: {response.url} (score: {career_score:.2f})")
         
+        # Tăng crawled_pages sau khi xử lý
+        self.crawled_pages += 1
+        
         # Dừng nếu đã crawl đủ pages hoặc tìm thấy đủ career pages
         if self.crawled_pages >= self.max_pages or self.found_career_pages >= 3:
+            logger.info(f"⏹️ Stopping crawl: pages={self.crawled_pages}, career_pages={self.found_career_pages}")
             return
         
         # Tìm thêm links nếu cần
@@ -256,13 +284,19 @@ class OptimizedCareerSpider(scrapy.Spider):
             links = self.extract_all_links(response)
             prioritized_links = self.prioritize_links(links, response.url)
             
+            should_break = False
             for priority, link_list in prioritized_links.items():
+                if should_break:
+                    break
+                    
                 for link in link_list[:2]:  # Chỉ crawl 2 links mỗi priority
                     if self.crawled_pages >= self.max_pages:
+                        should_break = True
                         break
                         
                     full_url = urljoin(response.url, link)
                     if urlparse(full_url).netloc == self.domain:
+                        logger.info(f"🔗 Adding to crawl queue: {full_url}")
                         yield scrapy.Request(
                             url=full_url,
                             callback=self.parse_page,

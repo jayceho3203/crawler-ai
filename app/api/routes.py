@@ -51,7 +51,7 @@ async def detect_career_pages_scrapy(request: CareerPagesRequest):
         result = await career_pages_service.detect_career_pages(
             url=request.url,
             include_subdomain_search=request.include_subdomain_search,
-            max_pages_to_scan=min(request.max_pages_to_scan, 0),  # Limit to 20 pages max
+            max_pages_to_scan=min(request.max_pages_to_scan, 30),  # Limit to 20 pages max
             strict_filtering=request.strict_filtering,
             include_job_boards=request.include_job_boards,
             use_scrapy=True  # Force Scrapy
