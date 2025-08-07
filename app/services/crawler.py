@@ -101,6 +101,17 @@ async def extract_with_playwright(url: str) -> Dict:
             email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
             emails = re.findall(email_pattern, html_content)
             
+            # Extract phone numbers using regex
+            phone_patterns = [
+                r'\+84\s?\d{1,2}\s?\d{3}\s?\d{3}\s?\d{3}',  # +84 1900 638399
+                r'0\d{1,2}\s?\d{3}\s?\d{3}\s?\d{3}',         # 01900 638399
+                r'\d{10,11}',                                 # 1900638399
+            ]
+            phones = []
+            for pattern in phone_patterns:
+                found_phones = re.findall(pattern, html_content)
+                phones.extend(found_phones)
+            
             # Extract all URLs
             urls = []
             try:
@@ -207,6 +218,7 @@ async def extract_with_playwright(url: str) -> Dict:
                 "url": response.url if response else url,
                 "html": html_content,
                 "emails": list(set(emails)),
+                "phones": list(set(phones)),
                 "urls": list(set(urls)),
                 "career_urls": list(set(career_urls)),
                 "career_analysis": filtered_career_results,
@@ -758,6 +770,7 @@ async def crawl_website(url: str) -> List[Dict[str, str]]:
         
         # Extract emails from the result
         emails = result.get('emails', [])
+        phones = result.get('phones', [])
         extracted_data = []
         
         # Add emails
@@ -765,6 +778,13 @@ async def crawl_website(url: str) -> List[Dict[str, str]]:
             extracted_data.append({
                 'label': 'email',
                 'value': email
+            })
+        
+        # Add phones
+        for phone in phones:
+            extracted_data.append({
+                'label': 'phone',
+                'value': phone
             })
         
         # Add URLs (social links, career pages, etc.)

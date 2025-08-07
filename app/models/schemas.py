@@ -96,6 +96,9 @@ class CareerPagesResponse(BaseModel):
     total_urls_scanned: int = 0
     valid_career_pages: int = 0
     confidence_score: float = 0.0
+    # Contact info (if career pages found)
+    contact_info: Optional[Dict] = None
+    has_contact_info: bool = False
 
 class JobExtractionRequest(BaseModel):
     """Request model for job extraction"""

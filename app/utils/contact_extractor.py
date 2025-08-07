@@ -98,13 +98,37 @@ def is_career_page_strict(url: str, title: str, content: str) -> bool:
 def extract_valid_email(email_str: str) -> Optional[str]:
     """Extract and validate email address"""
     email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
+    
+    # Skip image files and invalid emails
+    if any(ext in email_str.lower() for ext in ['.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico']):
+        return None
+    
     match = re.search(email_pattern, email_str)
     if match:
         email = match.group(0).lower()
-        # Basic validation
+        # Additional validation
         if len(email) > 5 and '@' in email and '.' in email.split('@')[1]:
             return email
     return None
+
+def extract_valid_phone(phone_str: str) -> Optional[str]:
+    """Extract and validate phone number"""
+    # Remove common prefixes and clean up
+    phone = re.sub(r'[^\d+\-\s\(\)]', '', phone_str)
+    
+    # Vietnamese phone patterns
+    vn_patterns = [
+        r'\+84\s?\d{1,2}\s?\d{3}\s?\d{3}\s?\d{3}',  # +84 1900 638399
+        r'0\d{1,2}\s?\d{3}\s?\d{3}\s?\d{3}',         # 01900 638399
+        r'\d{10,11}',                                 # 1900638399
+    ]
+    
+    for pattern in vn_patterns:
+        match = re.search(pattern, phone)
+        if match:
+            return match.group(0)
+    
+
 
 def extract_embedded_url(href_content: str, base_domain_netloc: Optional[str] = None) -> str:
     """Extract URL from href content with proper handling"""
@@ -190,6 +214,7 @@ def process_extracted_crawl_results(
     emails = set()
     social_links = set()
     career_pages = set()
+    phones = set()
     
     base_domain = urlparse(base_url).netloc.lower()
     
@@ -205,6 +230,12 @@ def process_extracted_crawl_results(
             email = extract_valid_email(value)
             if email:
                 emails.add(email)
+        
+        # Process phone numbers
+        elif label == 'phone':
+            phone = extract_valid_phone(value)
+            if phone:
+                phones.add(phone)
         
         # Process URLs
         elif label == 'url':
@@ -247,8 +278,10 @@ def process_extracted_crawl_results(
     
     return {
         'emails': sorted(list(emails)),
+        'phones': sorted(list(phones)),
         'social_links': sorted(list(social_links)),
-        'career_pages': sorted(list(career_pages))
+        'career_pages': sorted(list(career_pages)),
+        'website': base_url
     } 
 
 async def extract_contact_info_from_url(url: str) -> Dict[str, List[str]]:
