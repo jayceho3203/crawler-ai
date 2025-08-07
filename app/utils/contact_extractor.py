@@ -116,7 +116,7 @@ def extract_valid_phone(phone_str: str) -> Optional[str]:
     # Remove common prefixes and clean up
     phone = re.sub(r'[^\d+\-\s\(\)]', '', phone_str)
     
-    # Vietnamese phone patterns
+    # Vietnamese phone patterns - more strict
     vn_patterns = [
         r'\+84\s?\d{1,2}\s?\d{3}\s?\d{3}\s?\d{3}',  # +84 1900 638399
         r'0\d{1,2}\s?\d{3}\s?\d{3}\s?\d{3}',         # 01900 638399
@@ -126,8 +126,20 @@ def extract_valid_phone(phone_str: str) -> Optional[str]:
     for pattern in vn_patterns:
         match = re.search(pattern, phone)
         if match:
-            return match.group(0)
+            phone_number = match.group(0)
+            
+            # Additional validation: must be reasonable length and format
+            clean_number = re.sub(r'[^\d]', '', phone_number)
+            
+            # Must be 10-11 digits for Vietnamese numbers
+            if len(clean_number) >= 10 and len(clean_number) <= 11:
+                # Must start with valid Vietnamese prefixes
+                valid_prefixes = ['0', '84', '+84']
+                if any(clean_number.startswith(prefix) for prefix in valid_prefixes):
+                    return phone_number
     
+    return None
+
 
 
 def extract_embedded_url(href_content: str, base_domain_netloc: Optional[str] = None) -> str:

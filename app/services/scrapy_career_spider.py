@@ -5,13 +5,11 @@ Tối ưu keywords và performance
 """
 
 import scrapy
-from scrapy.crawler import CrawlerProcess
-from scrapy.utils.project import get_project_settings
-from urllib.parse import urljoin, urlparse
 import json
-import logging
 import time
-from typing import List, Dict, Optional
+from urllib.parse import urljoin, urlparse
+from typing import List, Dict
+import logging
 
 logger = logging.getLogger(__name__)
 
@@ -254,22 +252,23 @@ class OptimizedCareerSpider(scrapy.Spider):
         
         logger.info(f"📄 Crawling page {self.crawled_pages + 1}/{self.max_pages}: {response.url} (priority: {priority})")
         
-        # Kiểm tra có phải career page không
-        career_score = self.calculate_career_score(response)
-        
-        if career_score >= 0.6:  # Threshold cao hơn để chính xác
-            career_page = {
-                'url': response.url,
-                'title': response.css('title::text').get() or '',
-                'confidence': career_score,
-                'indicators': self.get_career_indicators(response),
-                'priority_found': priority
-            }
+        # Kiểm tra có phải career listing page không
+        if self.is_career_listing_page(response):
+            career_score = self.calculate_career_score(response)
             
-            self.career_pages.append(career_page)
-            self.found_career_pages += 1
-            
-            logger.info(f"🎯 Career page found: {response.url} (score: {career_score:.2f})")
+            if career_score >= 0.6:  # Threshold cao hơn để chính xác
+                career_page = {
+                    'url': response.url,
+                    'title': response.css('title::text').get() or '',
+                    'confidence': career_score,
+                    'indicators': self.get_career_indicators(response),
+                    'priority_found': priority
+                }
+                
+                self.career_pages.append(career_page)
+                self.found_career_pages += 1
+                
+                logger.info(f"🎯 Career listing page found: {response.url} (score: {career_score:.2f})")
         
         # Tăng crawled_pages sau khi xử lý
         self.crawled_pages += 1
@@ -298,10 +297,9 @@ class OptimizedCareerSpider(scrapy.Spider):
                     if urlparse(full_url).netloc == self.domain:
                         logger.info(f"🔗 Adding to crawl queue: {full_url}")
                         yield scrapy.Request(
-                            url=full_url,
+                            full_url,
                             callback=self.parse_page,
-                            priority=priority,
-                            meta={'depth': response.meta.get('depth', 0) + 1, 'priority': priority}
+                            meta={'priority': priority}
                         )
     
     def calculate_career_score(self, response) -> float:
@@ -388,6 +386,46 @@ class OptimizedCareerSpider(scrapy.Spider):
         
         return indicators
     
+    def is_career_listing_page(self, response) -> bool:
+        """
+        Phân biệt career listing page vs job detail page
+        """
+        url = response.url.lower()
+        content = response.text.lower()
+        title = response.css('title::text').get('').lower()
+        
+        # Job detail page indicators (loại trừ)
+        job_detail_indicators = [
+            '/career/', '/job/', '/position/', '/opportunity/',
+            '/tuyen-dung/', '/viec-lam/', '/co-hoi/',
+            'senior', 'junior', 'developer', 'engineer', 'analyst',
+            'manager', 'lead', 'specialist', 'consultant'
+        ]
+        
+        # Nếu URL chứa job detail indicators -> không phải career listing page
+        for indicator in job_detail_indicators:
+            if indicator in url:
+                return False
+        
+        # Career listing page indicators
+        career_listing_indicators = [
+            'career.html', 'careers.html', 'job.html', 'jobs.html',
+            'tuyen-dung.html', 'viec-lam.html', 'co-hoi.html',
+            'recruitment', 'employment', 'hiring', 'join us',
+            'work with us', 'open positions', 'current openings'
+        ]
+        
+        # Nếu URL chứa career listing indicators -> là career listing page
+        for indicator in career_listing_indicators:
+            if indicator in url:
+                return True
+        
+        # Kiểm tra content
+        if any(indicator in content for indicator in ['apply now', 'view all jobs', 'browse positions', 'current openings']):
+            return True
+        
+        return False
+    
     def closed(self, reason):
         """
         Khi spider kết thúc
@@ -404,38 +442,30 @@ class OptimizedCareerSpider(scrapy.Spider):
                     'title': '',
                     'confidence': 0.0,
                     'indicators': [],
-                    'priority_found': 10
+                    'priority_found': 0
                 })
         
+        # Tạo result chỉ với career pages
         result = {
             'success': True,
-            'requested_url': self.start_urls[0] if self.start_urls else '',
+            'requested_url': self.start_url,
             'career_pages': career_pages_data,
             'total_pages_crawled': self.crawled_pages,
-            'career_pages_found': len(self.career_pages),
-            'crawl_time': getattr(self, 'crawl_time', 0),
+            'career_pages_found': len(career_pages_data),
+            'crawl_time': time.time() - self.start_time,
             'crawl_method': 'scrapy_optimized'
         }
         
-        logger.info(f"✅ Optimized crawling completed: {self.crawled_pages} pages, {len(self.career_pages)} career pages found")
-        logger.info(f"🔍 Career pages data: {self.career_pages}")
-        logger.info(f"🔍 Final result to write: {result}")
+        # Ghi result vào file
+        timestamp = int(time.time())
+        result_file = f'scrapy_result_{timestamp}.json'
         
-        # Ghi kết quả trực tiếp - KHÔNG dùng FeedExporter
-        import json
-        import os
-        import time
-        
-        # Ghi trực tiếp vào result file
-        result_file = f'scrapy_result_{int(time.time())}.json'
-        logger.info(f"🔍 Writing to result file: {result_file}")
         try:
-            # Ghi trực tiếp 1 object JSON duy nhất
-            with open(result_file, 'w') as f:
-                json.dump(result, f, indent=2, ensure_ascii=False)
-            logger.info(f"✅ Successfully wrote result to {result_file}")
+            with open(result_file, 'w', encoding='utf-8') as f:
+                json.dump(result, f, ensure_ascii=False, indent=2)
+            logger.info(f"✅ Result saved to: {result_file}")
         except Exception as e:
-            logger.error(f"Error writing result file: {e}")
+            logger.error(f"❌ Error saving result: {e}")
         
         return result
 
