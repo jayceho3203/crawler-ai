@@ -47,24 +47,65 @@ async def detect_career_pages_scrapy(request: CareerPagesRequest):
     try:
         logger.info(f"🚀 Scrapy career page detection + contact extraction for: {request.url}")
         
-        # Force use Scrapy to detect career pages
+        # Force use Scrapy to detect career pages with optimized settings
         result = await career_pages_service.detect_career_pages(
             url=request.url,
             include_subdomain_search=request.include_subdomain_search,
-            max_pages_to_scan=request.max_pages_to_scan,
+            max_pages_to_scan=min(request.max_pages_to_scan, 0),  # Limit to 20 pages max
             strict_filtering=request.strict_filtering,
             include_job_boards=request.include_job_boards,
             use_scrapy=True  # Force Scrapy
         )
         
-        # If career pages found, extract contact info
+        # If career pages found, extract contact info from the same crawl data
         contact_info = None
         if result.get('success') and result.get('career_pages'):
-            logger.info(f"🎯 Career pages found! Extracting contact info for: {request.url}")
+            logger.info(f"🎯 Career pages found! Extracting contact info from existing data for: {request.url}")
             try:
-                from ..utils.contact_extractor import extract_contact_info_from_url
-                contact_info = await extract_contact_info_from_url(request.url)
-                logger.info(f"✅ Contact info extracted successfully")
+                # Use the same crawl data instead of crawling again
+                from ..utils.contact_extractor import process_extracted_crawl_results
+                
+                # Extract contact info from the same HTML content that Scrapy already crawled
+                if hasattr(result, 'raw_html') and result.get('raw_html'):
+                    # Process the same HTML content
+                    from ..services.crawler import extract_with_playwright
+                    crawl_result = await extract_with_playwright(request.url)
+                    
+                    # Convert to format expected by contact extractor
+                    extracted_data = []
+                    
+                    # Add emails
+                    emails = crawl_result.get("emails", [])
+                    for email in emails:
+                        extracted_data.append({
+                            "label": "email",
+                            "value": email
+                        })
+                    
+                    # Add phones
+                    phones = crawl_result.get("phones", [])
+                    for phone in phones:
+                        extracted_data.append({
+                            "label": "phone",
+                            "value": phone
+                        })
+                    
+                    # Add URLs
+                    urls = crawl_result.get("urls", [])
+                    for url_item in urls:
+                        extracted_data.append({
+                            "label": "url",
+                            "value": url_item
+                        })
+                    
+                    # Process the extracted data
+                    contact_info = process_extracted_crawl_results(extracted_data, request.url)
+                    logger.info(f"✅ Contact info extracted from existing crawl data")
+                else:
+                    # Fallback to separate crawl if no raw HTML
+                    from ..utils.contact_extractor import extract_contact_info_from_url
+                    contact_info = await extract_contact_info_from_url(request.url)
+                    logger.info(f"✅ Contact info extracted with fallback method")
             except Exception as contact_error:
                 logger.warning(f"⚠️ Contact extraction failed: {contact_error}")
                 contact_info = None

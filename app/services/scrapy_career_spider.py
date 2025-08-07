@@ -21,21 +21,24 @@ class OptimizedCareerSpider(scrapy.Spider):
     """
     name = 'optimized_career_spider'
     
-    # Cấu hình tối ưu
+    # Cấu hình tối ưu cho speed
     custom_settings = {
-        'CONCURRENT_REQUESTS': 8,        # Tăng lên 8 trang cùng lúc
-        'CONCURRENT_REQUESTS_PER_DOMAIN': 8,
-        'DOWNLOAD_DELAY': 0.5,           # Giảm delay xuống 0.5s
+        'CONCURRENT_REQUESTS': 16,       # Tăng lên 16 trang cùng lúc
+        'CONCURRENT_REQUESTS_PER_DOMAIN': 16,
+        'DOWNLOAD_DELAY': 0.1,           # Giảm delay xuống 0.1s
         'ROBOTSTXT_OBEY': False,         # Tắt robots.txt để crawl nhanh hơn
         'COOKIES_ENABLED': False,        # Tắt cookies để tăng tốc
-        'DOWNLOAD_TIMEOUT': 15,          # Timeout 15s
-        'RETRY_TIMES': 2,                # Retry 2 lần
+        'DOWNLOAD_TIMEOUT': 10,          # Timeout 10s
+        'RETRY_TIMES': 1,                # Retry 1 lần
         'RETRY_HTTP_CODES': [500, 502, 503, 504, 408, 429],
         'USER_AGENT': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         # Tắt extensions không cần thiết để log sạch hơn
         'TELNETCONSOLE_ENABLED': False,  # Tắt Telnet để tránh lỗi ConnectionDone
         'LOGSTATS_INTERVAL': 60,         # Giảm log stats frequency
-        'MEMUSAGE_ENABLED': False        # Tắt memory usage tracking
+        'MEMUSAGE_ENABLED': False,       # Tắt memory usage tracking
+        'AUTOTHROTTLE_ENABLED': False,   # Tắt auto throttle
+        'AUTOTHROTTLE_START_DELAY': 0,   # Không delay
+        'AUTOTHROTTLE_MAX_DELAY': 0      # Không delay
     }
     
     def __init__(self, start_url: str = None, max_pages: int = 50, *args, **kwargs):
