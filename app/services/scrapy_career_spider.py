@@ -448,7 +448,7 @@ class OptimizedCareerSpider(scrapy.Spider):
         # Tạo result chỉ với career pages
         result = {
             'success': True,
-            'requested_url': self.start_url,
+            'requested_url': self.start_urls[0] if self.start_urls else '',
             'career_pages': career_pages_data,
             'total_pages_crawled': self.crawled_pages,
             'career_pages_found': len(career_pages_data),
