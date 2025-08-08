@@ -143,7 +143,7 @@ JOB_LINK_SELECTORS = [
 CACHE_DURATION = 3600  # 1 hour
 
 # Crawling configuration
-DEFAULT_TIMEOUT = 30000  # 30 seconds
+DEFAULT_TIMEOUT = 60000  # 60 seconds thay vì 30
 DEFAULT_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 DEFAULT_HEADERS = {
     'Accept-Language': 'vi-VN,vi;q=0.9,en;q=0.8',

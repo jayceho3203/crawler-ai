@@ -19,27 +19,27 @@ class OptimizedCareerSpider(scrapy.Spider):
     """
     name = 'optimized_career_spider'
     
-    # Cấu hình cân bằng speed và memory
+    # Cấu hình tối ưu cho speed
     custom_settings = {
-        'CONCURRENT_REQUESTS': 8,        # Cân bằng: 8 trang cùng lúc
-        'CONCURRENT_REQUESTS_PER_DOMAIN': 8,
-        'DOWNLOAD_DELAY': 0.3,           # Cân bằng: 0.3s delay
+        'CONCURRENT_REQUESTS': 16,       # Tăng lên 16 trang cùng lúc
+        'CONCURRENT_REQUESTS_PER_DOMAIN': 16,
+        'DOWNLOAD_DELAY': 0.1,           # Giảm delay xuống 0.1s
         'ROBOTSTXT_OBEY': False,         # Tắt robots.txt để crawl nhanh hơn
         'COOKIES_ENABLED': False,        # Tắt cookies để tăng tốc
-        'DOWNLOAD_TIMEOUT': 10,          # Timeout 10s
-        'RETRY_TIMES': 1,                # Retry 1 lần
+        'DOWNLOAD_TIMEOUT': 5,           # Giảm timeout xuống 5s
+        'RETRY_TIMES': 0,                # Tắt retry để tăng tốc
         'RETRY_HTTP_CODES': [500, 502, 503, 504, 408, 429],
         'USER_AGENT': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         # Tắt extensions không cần thiết để log sạch hơn
         'TELNETCONSOLE_ENABLED': False,  # Tắt Telnet để tránh lỗi ConnectionDone
         'LOGSTATS_INTERVAL': 60,         # Giảm log stats frequency
         'MEMUSAGE_ENABLED': False,       # Tắt memory usage tracking
-        'AUTOTHROTTLE_ENABLED': True,    # Bật auto throttle để tiết kiệm memory
-        'AUTOTHROTTLE_START_DELAY': 0.5, # Delay 0.5s
-        'AUTOTHROTTLE_MAX_DELAY': 2      # Max delay 2s
+        'AUTOTHROTTLE_ENABLED': False,   # Tắt auto throttle để tăng tốc
+        'AUTOTHROTTLE_START_DELAY': 0.1, # Delay 0.1s
+        'AUTOTHROTTLE_MAX_DELAY': 1      # Max delay 1s
     }
     
-    def __init__(self, start_url: str = None, max_pages: int = 50, *args, **kwargs):
+    def __init__(self, start_url: str = None, max_pages: int = 20, *args, **kwargs):
         super(OptimizedCareerSpider, self).__init__(*args, **kwargs)
         self.start_urls = [start_url] if start_url else ['https://example.com']
         self.max_pages = max_pages
@@ -85,9 +85,10 @@ class OptimizedCareerSpider(scrapy.Spider):
                 break
                 
             logger.info(f"🎯 Processing priority {priority} with {len(links)} links")
-            for link in links:
-                if self.crawled_pages >= self.max_pages:
-                    logger.info(f"⏹️ Reached max pages limit: {self.max_pages}")
+            # Chỉ crawl tối đa 3 links mỗi priority để tăng tốc
+            for link in links[:3]:
+                if self.crawled_pages >= self.max_pages or self.found_career_pages >= 2:
+                    logger.info(f"⏹️ Reached limit: pages={self.crawled_pages}, career_pages={self.found_career_pages}")
                     should_break = True
                     break
                     
@@ -273,9 +274,14 @@ class OptimizedCareerSpider(scrapy.Spider):
         # Tăng crawled_pages sau khi xử lý
         self.crawled_pages += 1
         
-        # Dừng nếu đã crawl đủ pages hoặc tìm thấy đủ career pages
-        if self.crawled_pages >= self.max_pages or self.found_career_pages >= 3:
-            logger.info(f"⏹️ Stopping crawl: pages={self.crawled_pages}, career_pages={self.found_career_pages}")
+        # Dừng sớm nếu đã tìm thấy đủ career pages
+        if self.found_career_pages >= 2:  # Giảm từ 3 xuống 2
+            logger.info(f"⏹️ Stopping crawl: Found enough career pages ({self.found_career_pages})")
+            return
+        
+        # Dừng nếu đã crawl đủ pages
+        if self.crawled_pages >= self.max_pages:
+            logger.info(f"⏹️ Stopping crawl: Reached max pages limit ({self.max_pages})")
             return
         
         # Tìm thêm links nếu cần
@@ -288,8 +294,8 @@ class OptimizedCareerSpider(scrapy.Spider):
                 if should_break:
                     break
                     
-                for link in link_list[:2]:  # Chỉ crawl 2 links mỗi priority
-                    if self.crawled_pages >= self.max_pages:
+                for link in link_list[:1]:  # Chỉ crawl 1 link mỗi priority để tăng tốc
+                    if self.crawled_pages >= self.max_pages or self.found_career_pages >= 2:
                         should_break = True
                         break
                         
