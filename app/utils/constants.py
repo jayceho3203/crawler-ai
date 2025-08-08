@@ -152,15 +152,53 @@ DEFAULT_HEADERS = {
 
 # Strong non-career indicators for filtering
 STRONG_NON_CAREER_INDICATORS = [
-    'blog', 'news', 'article', 'post', 'story', 'product', 'service', 'solution', 
-    'about', 'contact', 'industry', 'market', 'research', 'analysis', 'report', 
-    'webinar', 'conference', 'workshop', 'training', 'certification', 'award', 
-    'recognition', 'milestone', 'achievement', 'case-study', 'success-story', 
-    'testimonial', 'review', 'tutorial', 'guide', 'whitepaper', 'press', 'media', 
-    'publication', 'tin-tuc', 'tin', 'impact', 'social', 'enterprise', 'doanh-nghiep', 
-    'application', 'deployed', 'successfully', 'implementation', 'solution', 
-    'technology', 'digital', 'transformation', 'business', 'customer', 'experience', 
-    'management'
+    # Content types
+    'blog', 'news', 'article', 'post', 'story', 'tin-tuc', 'tin', 'bai-viet',
+    'whitepaper', 'ebook', 'ebooks', 'guide', 'tutorial', 'manual', 'documentation',
+    'case-study', 'case-studies', 'success-story', 'testimonial', 'review',
+    'press', 'media', 'publication', 'research', 'analysis', 'report',
+    
+    # Business pages
+    'product', 'products', 'service', 'services', 'solution', 'solutions',
+    'about', 'contact', 'company', 'team', 'leadership', 'investor',
+    'partnership', 'partners', 'client', 'customer', 'enterprise',
+    'industry', 'market', 'business', 'commercial', 'trade',
+    
+    # Technical/Development
+    'technology', 'tech', 'digital', 'transformation', 'implementation',
+    'deployment', 'development', 'deploy', 'successfully', 'application',
+    'software', 'platform', 'system', 'infrastructure', 'architecture',
+    'api', 'sdk', 'framework', 'library', 'tool', 'tools',
+    
+    # Events and Training
+    'webinar', 'conference', 'workshop', 'training', 'certification',
+    'event', 'events', 'seminar', 'meetup', 'summit', 'forum',
+    'award', 'recognition', 'milestone', 'achievement', 'celebration',
+    
+    # User/Account pages
+    'login', 'register', 'signup', 'signin', 'account', 'profile',
+    'dashboard', 'panel', 'admin', 'control', 'manage', 'settings',
+    'user', 'member', 'community', 'forum', 'support', 'help',
+    
+    # E-commerce
+    'cart', 'checkout', 'payment', 'order', 'purchase', 'buy', 'shop',
+    'store', 'marketplace', 'pricing', 'price', 'cost', 'fee',
+    
+    # Navigation/Utility
+    'home', 'main', 'index', 'search', 'filter', 'sort', 'category',
+    'tag', 'author', 'privacy', 'terms', 'policy', 'legal',
+    'sitemap', 'rss', 'feed', 'subscribe', 'newsletter',
+    
+    # Vietnamese specific
+    'doanh-nghiep', 'khach-hang', 'doi-tac', 'san-pham', 'dich-vu',
+    'giai-phap', 'cong-nghe', 'chuyen-gia', 'kinh-nghiem', 'du-an',
+    'nghien-cuu', 'phan-tich', 'bao-cao', 'tai-lieu', 'huong-dan',
+    'thanh-cong', 'danh-gia', 'nhan-xet', 'cam-nhan', 'chia-se',
+    'su-kien', 'hoi-thao', 'dao-tao', 'chung-chi', 'giai-thuong',
+    'dang-nhap', 'dang-ky', 'tai-khoan', 'quan-ly', 'cai-dat',
+    'gio-hang', 'thanh-toan', 'dat-hang', 'mua-hang', 'cua-hang',
+    'trang-chu', 'tim-kiem', 'danh-muc', 'the', 'tac-gia',
+    'quyen-rieng-tu', 'dieu-khoan', 'chinh-sach', 'phap-ly'
 ]
 
 # Strong non-job indicators for job link filtering
@@ -213,14 +251,14 @@ JOB_EXACT_PATTERNS = [
 ]
 
 # Scoring thresholds for strict filtering
-CAREER_SCORE_THRESHOLD = 6  # Minimum score for career page acceptance
-JOB_LINK_SCORE_THRESHOLD = 5  # Minimum score for job link acceptance
-CAREER_CONTENT_VALIDATION_THRESHOLD = 2  # Minimum career text indicators for content validation
-JOB_CONTENT_VALIDATION_THRESHOLD = 2  # Minimum job text indicators for content validation
+CAREER_SCORE_THRESHOLD = 8  # Tăng từ 6 lên 8 - Minimum score for career page acceptance
+JOB_LINK_SCORE_THRESHOLD = 6  # Tăng từ 5 lên 6 - Minimum score for job link acceptance
+CAREER_CONTENT_VALIDATION_THRESHOLD = 3  # Tăng từ 2 lên 3 - Minimum career text indicators for content validation
+JOB_CONTENT_VALIDATION_THRESHOLD = 3  # Tăng từ 2 lên 3 - Minimum job text indicators for content validation
 
 # Path depth limits
-MAX_CAREER_PATH_DEPTH = 4  # Maximum path depth for career pages
-MAX_JOB_PATH_DEPTH = 5  # Maximum path depth for job links
+MAX_CAREER_PATH_DEPTH = 2  # Giảm từ 4 xuống 2 - Maximum path depth for career pages
+MAX_JOB_PATH_DEPTH = 3  # Giảm từ 5 xuống 3 - Maximum path depth for job links
 
 # File extensions to reject
 REJECTED_FILE_EXTENSIONS = [

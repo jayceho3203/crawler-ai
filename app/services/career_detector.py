@@ -59,7 +59,7 @@ def check_early_rejection(url: str, url_analysis: Dict) -> Tuple[bool, str]:
     query_lower = url_analysis['query']
     path_segments = url_analysis['path_segments']
     
-    # 1. Strong non-career indicators
+    # 1. Strong non-career indicators (STRICT filtering)
     for indicator in STRONG_NON_CAREER_INDICATORS:
         if indicator in path_lower or indicator in query_lower:
             return True, f"Contains non-career indicator: {indicator}"
@@ -69,6 +69,7 @@ def check_early_rejection(url: str, url_analysis: Dict) -> Tuple[bool, str]:
         r'/\d{4}[/-]\d{1,2}[/-]\d{1,2}',  # YYYY/MM/DD or YYYY-MM-DD
         r'/\d{4}/\d{1,2}',  # YYYY/MM
         r'/\d{1,2}/\d{4}',  # MM/YYYY
+        r'/\d{4}',  # Just year
     ]
     for pattern in date_patterns:
         if re.search(pattern, path_lower):
@@ -79,6 +80,7 @@ def check_early_rejection(url: str, url_analysis: Dict) -> Tuple[bool, str]:
         r'/[a-f0-9]{8,}',  # Long hex IDs
         r'/\d{5,}',  # Long numeric IDs
         r'/[a-z0-9]{10,}',  # Long alphanumeric IDs
+        r'/[a-f0-9]{4,}',  # Medium hex IDs
     ]
     for pattern in id_patterns:
         if re.search(pattern, path_lower):
@@ -86,37 +88,70 @@ def check_early_rejection(url: str, url_analysis: Dict) -> Tuple[bool, str]:
     
     # 4. File extensions (likely documents/media)
     file_extensions = ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', 
-                      '.jpg', '.jpeg', '.png', '.gif', '.mp4', '.avi', '.zip']
+                      '.jpg', '.jpeg', '.png', '.gif', '.mp4', '.avi', '.zip',
+                      '.xml', '.json', '.txt', '.csv', '.html', '.htm']
     for ext in file_extensions:
         if ext in path_lower:
             return True, f"Contains file extension: {ext}"
     
     # 5. Very deep paths (unlikely to be main career pages)
-    if url_analysis['path_depth'] > 3:  # Reduced from 5 to 3
+    if url_analysis['path_depth'] > 2:  # Reduced from 3 to 2
         return True, f"Path too deep: {url_analysis['path_depth']} levels"
     
-    # 6. Job detail pages (should not be considered as career listing pages)
+    # 6. Specific non-career path patterns
+    non_career_paths = [
+        '/services/', '/service/', '/products/', '/product/',
+        '/solutions/', '/solution/', '/about/', '/contact/',
+        '/news/', '/blog/', '/article/', '/post/',
+        '/events/', '/event/', '/webinar/', '/conference/',
+        '/training/', '/certification/', '/workshop/',
+        '/case-study/', '/case-studies/', '/success-story/',
+        '/testimonial/', '/review/', '/whitepaper/',
+        '/ebook/', '/ebooks/', '/guide/', '/tutorial/',
+        '/documentation/', '/manual/', '/api/', '/sdk/',
+        '/framework/', '/library/', '/tool/', '/tools/',
+        '/platform/', '/system/', '/infrastructure/',
+        '/architecture/', '/deployment/', '/implementation/',
+        '/login/', '/register/', '/signup/', '/signin/',
+        '/account/', '/profile/', '/dashboard/', '/panel/',
+        '/admin/', '/control/', '/manage/', '/settings/',
+        '/cart/', '/checkout/', '/payment/', '/order/',
+        '/purchase/', '/buy/', '/shop/', '/store/',
+        '/marketplace/', '/pricing/', '/price/', '/cost/',
+        '/fee/', '/search/', '/filter/', '/sort/',
+        '/category/', '/tag/', '/author/', '/privacy/',
+        '/terms/', '/policy/', '/legal/', '/sitemap/',
+        '/rss/', '/feed/', '/subscribe/', '/newsletter/',
+        # Vietnamese specific
+        '/dich-vu/', '/san-pham/', '/giai-phap/', '/tin-tuc/',
+        '/bai-viet/', '/su-kien/', '/hoi-thao/', '/dao-tao/',
+        '/chung-chi/', '/giai-thuong/', '/thanh-cong/',
+        '/danh-gia/', '/nhan-xet/', '/cam-nhan/', '/chia-se/',
+        '/dang-nhap/', '/dang-ky/', '/tai-khoan/', '/quan-ly/',
+        '/cai-dat/', '/gio-hang/', '/thanh-toan/', '/dat-hang/',
+        '/mua-hang/', '/cua-hang/', '/trang-chu/', '/tim-kiem/',
+        '/danh-muc/', '/the/', '/tac-gia/', '/quyen-rieng-tu/',
+        '/dieu-khoan/', '/chinh-sach/', '/phap-ly/'
+    ]
+    
+    for non_career_path in non_career_paths:
+        if non_career_path in path_lower:
+            return True, f"Contains non-career path: {non_career_path}"
+    
+    # 7. Job detail pages (should not be considered as career listing pages)
     if url_analysis['path_depth'] > 1:
         # Check if it looks like a job detail page
-        path_lower = url_analysis['path']
         job_detail_indicators = [
-            '/hn---', '/hcm---', '/hanoi---', '/ho-chi-minh---',
-            '/senior-', '/junior-', '/lead-', '/principal-',
-            '/developer', '/engineer', '/analyst', '/manager',
-            '/designer', '/tester', '/qa-', '/devops-',
-            '/frontend-', '/backend-', '/fullstack-', '/mobile-',
-            '/web-', '/data-', '/ai-', '/ml-', '/ui-', '/ux-'
+            '/job/', '/jobs/', '/position/', '/career/', '/opportunity/',
+            '/vacancy/', '/apply/', '/application/', '/tuyen-dung/',
+            '/viec-lam/', '/co-hoi/', '/ung-vien/', '/cong-viec/'
         ]
         for indicator in job_detail_indicators:
             if indicator in path_lower:
-                return True, f"Looks like job detail page: {indicator}"
+                # If it's a job detail page, reject it
+                return True, f"Job detail page detected: {indicator}"
     
-    # 6. Specific non-career path patterns
-    for pattern in REJECTED_NON_CAREER_PATHS:
-        if pattern in path_lower:
-            return True, f"Contains non-career path: {pattern}"
-    
-    return False, ""
+    return False, "Passed all rejection checks"
 
 def calculate_career_score(url: str, url_analysis: Dict) -> Tuple[int, Dict[str, int]]:
     """Calculate comprehensive career score with detailed breakdown"""

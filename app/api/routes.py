@@ -186,10 +186,17 @@ async def extract_job_details(request: JobDetailsRequest):
             job_url=job_url
         )
         
+        # Get job details with new field names
+        job_details = result.get('job_details', {})
+        
         return {
             'success': True,
             'job_url': job_url,
-            'job_details': result.get('job_details', {}),
+            'job_name': job_details.get('job_name', ''),
+            'job_type': job_details.get('job_type', 'Full-time'),
+            'job_role': job_details.get('job_role', ''),
+            'job_description': job_details.get('job_description', ''),
+            'job_link': job_details.get('job_link', job_url),
             'crawl_time': result.get('crawl_time', 0),
             'crawl_method': 'scrapy_optimized'
         }
@@ -200,7 +207,11 @@ async def extract_job_details(request: JobDetailsRequest):
             'success': False,
             'job_url': request.url,
             'error_message': str(e),
-            'job_details': {}
+            'job_name': '',
+            'job_type': 'Full-time',
+            'job_role': '',
+            'job_description': '',
+            'job_link': request.url
         }
 
 class AIAgentRequest(BaseModel):

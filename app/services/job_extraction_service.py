@@ -654,11 +654,11 @@ class JobExtractionService:
             soup = BeautifulSoup(html_content, 'html.parser')
             
             job_details = {
-                'title': '',           # Job Name
+                'job_name': '',        # Job Name (thay vì title)
                 'job_type': 'Full-time', # Job Type
-                'job_role': '',        # Job Role (same as title)
-                'description': '',     # Job Description
-                'url': job_url         # Job Link
+                'job_role': '',        # Job Role
+                'job_description': '', # Job Description (thay vì description)
+                'job_link': job_url    # Job Link (thay vì url)
             }
             
             # Enhanced title extraction
@@ -672,8 +672,8 @@ class JobExtractionService:
                 if title_element:
                     title_text = title_element.get_text().strip()
                     if title_text and len(title_text) > 3:
-                        job_details['title'] = title_text
-                        job_details['job_role'] = title_text  # Set job_role same as title
+                        job_details['job_name'] = title_text
+                        job_details['job_role'] = title_text  # Set job_role same as job_name
                         break
             
             # Enhanced description extraction
@@ -687,25 +687,25 @@ class JobExtractionService:
                 if desc_element:
                     desc_text = desc_element.get_text().strip()
                     if desc_text and len(desc_text) > 50:
-                        job_details['description'] = desc_text[:2000]
+                        job_details['job_description'] = desc_text[:2000]
                         break
             
             # Company info is already in Wehappi company details, so we skip it here
             
-            # Set job_role same as title for Wehappi
-            if job_details['title']:
-                job_details['job_role'] = job_details['title']
+            # Set job_role same as job_name for Wehappi
+            if job_details['job_name']:
+                job_details['job_role'] = job_details['job_name']
             
             # Debug logging for Wehappi fields
             logger.info(f"🔍 Job extraction debug (Wehappi fields):")
-            logger.info(f"   📄 Job Name (title): {bool(job_details['title'])}")
+            logger.info(f"   📄 Job Name (title): {bool(job_details['job_name'])}")
             logger.info(f"   📄 Job Type: {bool(job_details['job_type'])}")
             logger.info(f"   📄 Job Role: {bool(job_details['job_role'])}")
-            logger.info(f"   📄 Job Description: {bool(job_details['description'])}")
-            logger.info(f"   📄 Job Link (url): {bool(job_details['url'])}")
+            logger.info(f"   📄 Job Description: {bool(job_details['job_description'])}")
+            logger.info(f"   📄 Job Link (url): {bool(job_details['job_link'])}")
             
             # If no job details found, try alternative extraction
-            if not job_details['title'] and not job_details['description']:
+            if not job_details['job_name'] and not job_details['job_description']:
                 logger.info(f"   🔄 No job details found, trying alternative extraction")
                 alternative_job = await self._extract_job_alternative_methods(soup, job_url)
                 if alternative_job:
@@ -716,14 +716,14 @@ class JobExtractionService:
         except Exception as e:
             logger.error(f"Error extracting job details from HTML: {e}")
             return {
-                'title': '',
+                'job_name': '',
                 'company': '',
                 'location': '',
                 'job_type': 'Full-time',
                 'salary': '',
                 'posted_date': '',
-                'url': job_url,
-                'description': '',
+                'job_link': job_url,
+                'job_description': '',
                 'requirements': '',
                 'benefits': ''
             }
@@ -748,11 +748,11 @@ class JobExtractionService:
                     potential_title = matches[0]
                     if len(potential_title) > 5:
                         return {
-                            'title': potential_title,
+                            'job_name': potential_title,
                             'job_type': 'Full-time',
                             'job_role': potential_title,
-                            'description': all_text[:1000] if len(all_text) > 100 else all_text,
-                            'url': job_url
+                            'job_description': all_text[:1000] if len(all_text) > 100 else all_text,
+                            'job_link': job_url
                         }
             
             # Method 2: Look for any content in main areas
@@ -761,11 +761,11 @@ class JobExtractionService:
                 main_text = main_content.get_text().strip()
                 if len(main_text) > 100:
                     return {
-                        'title': 'Job Opportunity',  # Generic title
+                        'job_name': 'Job Opportunity',  # Generic title
                         'job_type': 'Full-time',
                         'job_role': 'Job Opportunity',
-                        'description': main_text[:1000],
-                        'url': job_url
+                        'job_description': main_text[:1000],
+                        'job_link': job_url
                     }
             
             return {}
