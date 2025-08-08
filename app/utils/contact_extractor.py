@@ -225,7 +225,6 @@ def process_extracted_crawl_results(
     """
     emails = set()
     social_links = set()
-    career_pages = set()
     phones = set()
     
     base_domain = urlparse(base_url).netloc.lower()
@@ -249,52 +248,38 @@ def process_extracted_crawl_results(
             if phone:
                 phones.add(phone)
         
-        # Process URLs
+        # Process URLs - only contact-related URLs
         elif label == 'url':
             normalized_url = normalize_url(value, base_url)
+            
+            # Reject non-HTTP URLs (mailto, tel, javascript, etc.)
+            if not normalized_url.startswith(('http://', 'https://')):
+                continue
             
             # Check if it's a social media link
             url_domain = urlparse(normalized_url).netloc.lower()
             if any(social_domain in url_domain for social_domain in SOCIAL_DOMAINS):
                 social_links.add(normalized_url)
             
-            # Check if it's a career page with strict filtering
+            # Only add contact-related URLs (contact, about, etc.)
             url_lower = normalized_url.lower()
-            is_career = False
+            contact_keywords = ['contact', 'about', 'team', 'company', 'lien-he', 'gioi-thieu']
             
-            # Reject non-HTTP URLs (mailto, tel, javascript, etc.)
-            if not normalized_url.startswith(('http://', 'https://')):
-                continue
-            
-            # First, check for non-career patterns (reject early)
-            for pattern in REJECTED_NON_CAREER_PATHS:
-                if pattern in url_lower:
-                    is_career = False
+            is_contact_related = False
+            for keyword in contact_keywords:
+                if keyword in url_lower:
+                    is_contact_related = True
                     break
-            else:
-                # Only check for career patterns if not rejected
-                # Check for career keywords in URL
-                for keyword in CAREER_KEYWORDS_VI:
-                    if keyword in url_lower:
-                        is_career = True
-                        break
-                
-                # Check for career path patterns
-                for pattern in CAREER_EXACT_PATTERNS:
-                    if pattern in url_lower:
-                        is_career = True
-                        break
             
-            if is_career:
-                career_pages.add(normalized_url)
+            # Don't add career pages to contact info
+            # Don't add general URLs that are not contact-related
     
     return {
         'emails': sorted(list(emails)),
         'phones': sorted(list(phones)),
         'social_links': sorted(list(social_links)),
-        'career_pages': sorted(list(career_pages)),
         'website': base_url
-    } 
+    }
 
 async def extract_contact_info_from_url(url: str) -> Dict[str, List[str]]:
     """

@@ -90,13 +90,19 @@ async def detect_career_pages_scrapy(request: CareerPagesRequest):
                             "value": phone
                         })
                     
-                    # Add URLs
+                    # Add URLs - only contact-related URLs
                     urls = crawl_result.get("urls", [])
                     for url_item in urls:
-                        extracted_data.append({
-                            "label": "url",
-                            "value": url_item
-                        })
+                        url_lower = url_item.lower()
+                        # Only include contact-related URLs
+                        contact_keywords = ['contact', 'about', 'team', 'company', 'lien-he', 'gioi-thieu']
+                        is_contact_related = any(keyword in url_lower for keyword in contact_keywords)
+                        
+                        if is_contact_related:
+                            extracted_data.append({
+                                "label": "url",
+                                "value": url_item
+                            })
                     
                     # Process the extracted data
                     contact_info = process_extracted_crawl_results(extracted_data, request.url)
@@ -273,13 +279,19 @@ async def extract_contact_info(request: dict):
                 "value": phone
             })
         
-        # Add URLs
+        # Only add contact-related URLs, not all URLs
         urls = crawl_result.get("urls", [])
         for url_item in urls:
-            extracted_data.append({
-                "label": "url",
-                "value": url_item
-            })
+            url_lower = url_item.lower()
+            # Only include contact-related URLs
+            contact_keywords = ['contact', 'about', 'team', 'company', 'lien-he', 'gioi-thieu']
+            is_contact_related = any(keyword in url_lower for keyword in contact_keywords)
+            
+            if is_contact_related:
+                extracted_data.append({
+                    "label": "url",
+                    "value": url_item
+                })
         
         # Process the extracted data
         contact_info = process_extracted_crawl_results(extracted_data, url)
@@ -298,7 +310,6 @@ async def extract_contact_info(request: dict):
                 "emails": [],
                 "phones": [],
                 "social_links": [],
-                "career_pages": [],
                 "website": url
             }
         }
