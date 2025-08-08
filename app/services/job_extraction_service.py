@@ -579,8 +579,9 @@ class JobExtractionService:
                     # Jobs have individual URLs
                     response['job_urls'] = job_urls
                 else:
-                    # Jobs don't have individual URLs, use career page URL
-                    response['job_urls'] = [career_page_url]
+                    # Jobs don't have individual URLs, return empty array instead of career page URL
+                    response['job_urls'] = []
+                    logger.warning(f"   ⚠️ No individual job URLs found, returning empty array")
                 
                 return response
                 
@@ -605,21 +606,51 @@ class JobExtractionService:
         try:
             logger.info(f"📄 Extracting job details from: {job_url}")
             
-            # Crawl the job page
-            result = await crawl_single_url(job_url)
+            # Check if the URL is actually a career page (not a specific job page)
+            is_career_page = self._is_career_page_url(job_url)
             
-            if not result['success']:
-                return {
-                    'success': False,
-                    'job_url': job_url,
-                    'error_message': 'Failed to crawl job page',
-                    'job_details': {},
-                    'crawl_time': (datetime.now() - start_time).total_seconds(),
-                    'crawl_method': 'scrapy_optimized'
-                }
-            
-            # Extract job details from HTML
-            job_details = await self._extract_job_details_from_html(result, job_url)
+            if is_career_page:
+                logger.info(f"   ⚠️ URL appears to be a career page, extracting jobs from career page")
+                # Extract jobs from career page instead
+                result = await self._extract_jobs_from_single_page(
+                    job_url, max_jobs=10, include_hidden_jobs=True, include_job_details=True
+                )
+                
+                if result['success'] and result.get('jobs'):
+                    # Take the first job as the main job
+                    first_job = result['jobs'][0]
+                    job_details = {
+                        'job_name': first_job.get('title', ''),
+                        'job_type': first_job.get('job_type', 'Full-time'),
+                        'job_role': first_job.get('title', ''),
+                        'job_description': first_job.get('description', ''),
+                        'job_link': job_url
+                    }
+                else:
+                    # No jobs found, return empty details
+                    job_details = {
+                        'job_name': '',
+                        'job_type': 'Full-time',
+                        'job_role': '',
+                        'job_description': '',
+                        'job_link': job_url
+                    }
+            else:
+                # Normal job detail page extraction
+                result = await crawl_single_url(job_url)
+                
+                if not result['success']:
+                    return {
+                        'success': False,
+                        'job_url': job_url,
+                        'error_message': 'Failed to crawl job page',
+                        'job_details': {},
+                        'crawl_time': (datetime.now() - start_time).total_seconds(),
+                        'crawl_method': 'scrapy_optimized'
+                    }
+                
+                # Extract job details from HTML
+                job_details = await self._extract_job_details_from_html(result, job_url)
             
             crawl_time = (datetime.now() - start_time).total_seconds()
             
@@ -643,6 +674,30 @@ class JobExtractionService:
                 'crawl_time': (datetime.now() - start_time).total_seconds(),
                 'crawl_method': 'scrapy_optimized'
             }
+    
+    def _is_career_page_url(self, url: str) -> bool:
+        """Check if URL is a career page (not a specific job page)"""
+        url_lower = url.lower()
+        
+        # Career page indicators
+        career_indicators = [
+            '/career', '/careers', '/jobs', '/positions', '/tuyen-dung',
+            '/recruitment', '/vacancies', '/openings', '/opportunities'
+        ]
+        
+        # Check if URL ends with career page patterns
+        for indicator in career_indicators:
+            if url_lower.endswith(indicator) or url_lower.endswith(indicator + '/'):
+                return True
+        
+        # Check if URL contains career page patterns without job-specific keywords
+        for indicator in career_indicators:
+            if indicator in url_lower:
+                # If it's just the career page without specific job info
+                if not any(keyword in url_lower for keyword in ['developer', 'engineer', 'designer', 'manager', 'analyst', 'senior', 'junior']):
+                    return True
+        
+        return False
     
     async def _extract_job_details_from_html(self, result: Dict, job_url: str) -> Dict:
         """Extract job details from HTML content"""
@@ -853,7 +908,7 @@ class JobExtractionService:
             
             job_urls = []
             
-            # Method 1: Look for job links with common patterns (generic, no .html)
+            # Method 1: Look for job links with common patterns (less restrictive)
             job_link_patterns = [
                 r'/career/[^"]+',
                 r'/careers/[^"]+',
@@ -863,7 +918,11 @@ class JobExtractionService:
                 r'/tuyen-dung/[^"]+',
                 r'/recruitment/[^"]+',
                 r'/vacancies/[^"]+',
-                r'/openings/[^"]+'
+                r'/openings/[^"]+',
+                r'/job/[^"]+',
+                r'/position/[^"]+',
+                r'/vacancy/[^"]+',
+                r'/opening/[^"]+'
             ]
             
             # Find all links
@@ -888,13 +947,11 @@ class JobExtractionService:
                             # Filter out product pages
                             not '/product' in full_url and
                             # Filter out hash fragments
-                            not '#' in full_url and
-                            # Must contain job-related keywords in URL
-                            any(keyword in full_url.lower() for keyword in ['developer', 'engineer', 'designer', 'manager', 'analyst', 'senior', 'junior', 'c-sharp', 'dotnet', 'java', 'python', 'react', 'vue', 'angular'])):
+                            not '#' in full_url):
                             job_urls.append(full_url)
                             logger.info(f"   🔗 Found job URL: {full_url}")
                 
-                # Check if link text contains job-related keywords
+                # Check if link text contains job-related keywords (more flexible)
                 link_text = link.get_text().strip().lower()
                 job_keywords = [
                     # Job roles
@@ -922,11 +979,17 @@ class JobExtractionService:
                     
                     # Vietnamese keywords
                     'lập trình', 'phát triển', 'thiết kế', 'quản lý', 'phân tích',
-                    'chuyên viên', 'trưởng nhóm', 'giám đốc', 'thực tập', 'cộng tác viên'
+                    'chuyên viên', 'trưởng nhóm', 'giám đốc', 'thực tập', 'cộng tác viên',
+                    'tuyển dụng', 'việc làm', 'cơ hội', 'vị trí'
                 ]
                 if any(keyword in link_text for keyword in job_keywords):
                     full_url = urljoin(career_page_url, href)
-                    if full_url not in job_urls and full_url != career_page_url:
+                    if (full_url not in job_urls and 
+                        full_url != career_page_url and
+                        not full_url.endswith('/career') and
+                        not full_url.endswith('/careers') and
+                        not full_url.endswith('/jobs') and
+                        not full_url.endswith('/positions')):
                         job_urls.append(full_url)
                         logger.info(f"   🔗 Found job URL by keyword: {full_url}")
             
@@ -943,7 +1006,12 @@ class JobExtractionService:
                 if link:
                     href = link.get('href')
                     full_url = urljoin(career_page_url, href)
-                    if full_url not in job_urls and full_url != career_page_url:
+                    if (full_url not in job_urls and 
+                        full_url != career_page_url and
+                        not full_url.endswith('/career') and
+                        not full_url.endswith('/careers') and
+                        not full_url.endswith('/jobs') and
+                        not full_url.endswith('/positions')):
                         job_urls.append(full_url)
                         logger.info(f"   🔗 Found job URL from card: {full_url}")
             
@@ -992,20 +1060,9 @@ class JobExtractionService:
                     logger.info(f"   ⚠️ Skipping generic career page: {url}")
                     continue
                 
-                # Must contain job-related keywords in URL
-                job_keywords = [
-                    'developer', 'engineer', 'designer', 'manager', 'analyst', 
-                    'senior', 'junior', 'lead', 'head', 'chief', 'architect',
-                    'c-sharp', 'dotnet', 'java', 'python', 'react', 'vue', 'angular',
-                    'frontend', 'backend', 'fullstack', 'mobile', 'web', 'data',
-                    'ai', 'ml', 'devops', 'qa', 'testing', 'product'
-                ]
-                
-                if any(keyword in url.lower() for keyword in job_keywords):
-                    validated_urls.append(url)
-                    logger.info(f"   ✅ Validated job URL: {url}")
-                else:
-                    logger.info(f"   ⚠️ Skipping non-job URL: {url}")
+                # Accept the URL if it passes basic filters (no keyword requirement)
+                validated_urls.append(url)
+                logger.info(f"   ✅ Validated job URL: {url}")
             
             return validated_urls
             
