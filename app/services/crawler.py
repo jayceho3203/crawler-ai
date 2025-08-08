@@ -14,14 +14,8 @@ import asyncio
 from playwright.async_api import async_playwright
 
 from .cache import get_cached_result, cache_result
-from .career_detector import (
-    is_job_board_url, extract_career_pages_from_job_board, 
-    filter_career_urls
-)
-from .job_extractor import extract_job_links_detailed
 from ..utils.constants import (
-    CAREER_SELECTORS, DEFAULT_TIMEOUT, DEFAULT_USER_AGENT, DEFAULT_HEADERS,
-    JOB_LINK_SCORE_THRESHOLD
+    DEFAULT_TIMEOUT, DEFAULT_USER_AGENT, DEFAULT_HEADERS
 )
 
 logger = logging.getLogger(__name__)
@@ -65,7 +59,8 @@ async def extract_with_playwright(url: str) -> Dict:
             context = await browser.new_context(
                 viewport={'width': 1280, 'height': 720},
                 user_agent=DEFAULT_USER_AGENT,
-                extra_http_headers=DEFAULT_HEADERS
+                extra_http_headers=DEFAULT_HEADERS,
+                ignore_https_errors=True  # Ignore SSL certificate errors
             )
             
             page = await context.new_page()
@@ -86,9 +81,32 @@ async def extract_with_playwright(url: str) -> Dict:
             # Extract HTML content
             html_content = await page.content()
             
-            # Extract emails using regex
-            email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
-            emails = re.findall(email_pattern, html_content)
+            # Extract emails using enhanced patterns
+            email_patterns = [
+                r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b',
+                r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
+            ]
+            
+            all_emails = []
+            for pattern in email_patterns:
+                emails = re.findall(pattern, html_content, re.IGNORECASE)
+                all_emails.extend(emails)
+            
+            # Clean and validate emails
+            valid_emails = []
+            for email in all_emails:
+                email = email.strip().lower()
+                # Basic validation
+                if '@' in email and '.' in email.split('@')[1]:
+                    # Skip common invalid patterns
+                    if not any(invalid in email for invalid in [
+                        'cropped-favicon', 'favicon', '.png', '.jpg', '.jpeg', '.gif',
+                        'data:', 'javascript:', 'mailto:', 'tel:', 'http', 'https'
+                    ]):
+                        valid_emails.append(email)
+            
+            # Remove duplicates
+            valid_emails = list(set(valid_emails))
             
             # Extract phone numbers using regex
             phone_patterns = [
@@ -119,48 +137,12 @@ async def extract_with_playwright(url: str) -> Dict:
                         full_url = urljoin(url, href)
                         urls.append(full_url)
             
-            # Enhanced career URL extraction (tối ưu)
-            career_urls_raw = []
-            try:
-                for selector in CAREER_SELECTORS[:5]:  # Chỉ dùng 5 selectors đầu
-                    try:
-                        elements = await page.query_selector_all(selector)
-                        for element in elements[:10]:  # Giới hạn 10 elements
-                            href = await element.get_attribute('href')
-                            if href:
-                                full_url = urljoin(url, href)
-                                career_urls_raw.append(full_url)
-                    except:
-                        continue
-            except:
-                pass
-            
-            # Apply enhanced filtering with detailed analysis
-            html_contents = {url: html_content}
-            filtered_career_results = filter_career_urls(career_urls_raw, html_contents)
-            career_urls = [result['url'] for result in filtered_career_results if result['is_accepted']]
-            
-            # Enhanced job link detection (tối ưu)
-            soup = BeautifulSoup(html_content, 'html.parser')
-            job_links_detailed = extract_job_links_detailed(soup, url)
-            job_links_filtered = [link for link in job_links_detailed if link['job_score'] >= JOB_LINK_SCORE_THRESHOLD]
-            
-            # Check if this is a job board and extract company career pages (tối ưu)
-            if is_job_board_url(url):
-                logger.info(f"🎯 Detected job board: {url}")
-                job_board_career_pages = extract_career_pages_from_job_board(html_content, url)
-                # Apply filtering to job board career pages too
-                job_board_filtered = filter_career_urls(job_board_career_pages, html_contents)
-                job_board_accepted = [result['url'] for result in job_board_filtered if result['is_accepted']]
-                career_urls.extend(job_board_accepted[:10])  # Giới hạn 10 career pages
-                logger.info(f"📋 Found {len(job_board_accepted)} filtered company career pages from job board")
-            
             await browser.close()
             
             crawl_time = time.time() - start_time
             logger.info(f"✅ Playwright crawl completed: {url} - {crawl_time:.2f}s")
-            logger.info(f"📊 Career URLs: {len(career_urls_raw)} raw -> {len(career_urls)} filtered")
-            logger.info(f"📊 Job Links: {len(job_links_detailed)} detected -> {len(job_links_filtered)} filtered")
+            logger.info(f"📊 Emails found: {len(valid_emails)}")
+            logger.info(f"📊 URLs found: {len(urls)}")
             
             # Close browser to free memory
             await context.close()
@@ -171,16 +153,11 @@ async def extract_with_playwright(url: str) -> Dict:
                 "status_code": response.status if response else 200,
                 "url": response.url if response else url,
                 "html": html_content,
-                "emails": list(set(emails)),
+                "emails": list(set(valid_emails)),
                 "phones": list(set(phones)),
                 "urls": list(set(urls)),
-                "career_urls": list(set(career_urls)),
-                "career_analysis": filtered_career_results,
-                "job_links_detected": len(job_links_detailed),
-                "job_links_filtered": len(job_links_filtered),
-                "top_job_links": job_links_filtered[:10],
                 "crawl_time": crawl_time,
-                "method": "playwright"
+                "crawl_method": "playwright_optimized"
             }
             
     except Exception as e:
@@ -213,73 +190,92 @@ async def extract_with_requests(url: str) -> Dict:
             'User-Agent': DEFAULT_USER_AGENT,
             **DEFAULT_HEADERS
         }
-        async with aiohttp.ClientSession() as session:
+        
+        # Create SSL context that ignores certificate verification
+        import ssl
+        ssl_context = ssl.create_default_context()
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
+        
+        connector = aiohttp.TCPConnector(ssl=ssl_context)
+        
+        async with aiohttp.ClientSession(connector=connector) as session:
             async with session.get(url, headers=headers, timeout=30) as response:
                 response.raise_for_status()
-                
                 html_content = await response.text()
                 
-                # Extract emails using regex
-                email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
-                emails = re.findall(email_pattern, html_content)
+                # Extract emails using enhanced patterns
+                email_patterns = [
+                    r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b',
+                    r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
+                ]
                 
-                # Extract URLs
+                all_emails = []
+                for pattern in email_patterns:
+                    emails = re.findall(pattern, html_content, re.IGNORECASE)
+                    all_emails.extend(emails)
+                
+                # Clean and validate emails
+                valid_emails = []
+                for email in all_emails:
+                    email = email.strip().lower()
+                    # Basic validation
+                    if '@' in email and '.' in email.split('@')[1]:
+                        # Skip common invalid patterns
+                        if not any(invalid in email for invalid in [
+                            'cropped-favicon', 'favicon', '.png', '.jpg', '.jpeg', '.gif',
+                            'data:', 'javascript:', 'mailto:', 'tel:', 'http', 'https'
+                        ]):
+                            valid_emails.append(email)
+                
+                # Remove duplicates
+                valid_emails = list(set(valid_emails))
+                
+                # Extract phone numbers using regex
+                phone_patterns = [
+                    r'\+84\s?\d{1,2}\s?\d{3}\s?\d{3}\s?\d{3}',
+                    r'0\d{1,2}\s?\d{3}\s?\d{3}\s?\d{3}',
+                    r'\d{10,11}',
+                ]
+                phones = []
+                for pattern in phone_patterns:
+                    found_phones = re.findall(pattern, html_content)
+                    phones.extend(found_phones)
+                
+                # Extract all URLs (tối ưu - chỉ lấy 100 URLs đầu)
                 urls = []
                 soup = BeautifulSoup(html_content, 'html.parser')
-                for a_tag in soup.find_all('a', href=True):
+                for a_tag in soup.find_all('a', href=True)[:100]:  # Giới hạn 100 links
                     href = a_tag.get('href')
                     if href:
                         full_url = urljoin(url, href)
                         urls.append(full_url)
                 
-                # Enhanced career URL extraction
-                career_urls_raw = []
-                for url_found in urls:
-                    url_lower = url_found.lower()
-                    from ..utils.constants import CAREER_KEYWORDS_VI
-                    for keyword in CAREER_KEYWORDS_VI:
-                        if keyword in url_lower:
-                            career_urls_raw.append(url_found)
-                            break
-                
-                # Apply enhanced filtering with detailed analysis
-                html_contents = {url: html_content}
-                filtered_career_results = filter_career_urls(career_urls_raw, html_contents)
-                career_urls = [result['url'] for result in filtered_career_results if result['is_accepted']]
-                
-                # Enhanced job link detection
-                job_links_detailed = extract_job_links_detailed(soup, url)
-                job_links_filtered = [link for link in job_links_detailed if link['job_score'] >= JOB_LINK_SCORE_THRESHOLD]
-                
                 crawl_time = time.time() - start_time
-                logger.info(f"✅ Requests fallback completed: {url} - {crawl_time:.2f}s")
-                logger.info(f"📊 Career URLs: {len(career_urls_raw)} raw -> {len(career_urls)} filtered")
-                logger.info(f"📊 Job Links: {len(job_links_detailed)} detected -> {len(job_links_filtered)} filtered")
+                logger.info(f"✅ Requests crawl completed: {url} - {crawl_time:.2f}s")
+                logger.info(f"📊 Emails found: {len(valid_emails)}")
+                logger.info(f"📊 URLs found: {len(urls)}")
                 
                 return {
                     "success": True,
-                    "status_code": response.status,
-                    "url": response.url,
+                    "status_code": response.status if response else 200,
+                    "url": response.url if response else url,
                     "html": html_content,
-                    "emails": list(set(emails)),
+                    "emails": valid_emails,
+                    "phones": list(set(phones)),
                     "urls": list(set(urls)),
-                    "career_urls": list(set(career_urls)),
-                    "career_analysis": filtered_career_results,
-                    "job_links_detected": len(job_links_detailed),
-                    "job_links_filtered": len(job_links_filtered),
-                    "top_job_links": job_links_filtered[:10],
                     "crawl_time": crawl_time,
-                    "method": "requests"
+                    "crawl_method": "requests_optimized"
                 }
+                
     except Exception as e:
-        crawl_time = time.time() - start_time
-        logger.error(f"❌ Requests failed for {url}: {str(e)}")
+        logger.error(f"❌ Requests failed for {url}: {e}")
         return {
             "success": False,
             "error_message": str(e),
-            "status_code": 500,
-            "crawl_time": crawl_time,
-            "method": "requests"
+            "url": url,
+            "crawl_time": time.time() - start_time,
+            "crawl_method": "requests_optimized"
         }
 
 async def crawl_single_url(url: str) -> Dict:

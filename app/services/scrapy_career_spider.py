@@ -39,7 +39,7 @@ class OptimizedCareerSpider(scrapy.Spider):
         'AUTOTHROTTLE_MAX_DELAY': 1      # Max delay 1s
     }
     
-    def __init__(self, start_url: str = None, max_pages: int = 20, *args, **kwargs):
+    def __init__(self, start_url: str = None, max_pages: int = 50, *args, **kwargs):
         super(OptimizedCareerSpider, self).__init__(*args, **kwargs)
         self.start_urls = [start_url] if start_url else ['https://example.com']
         self.max_pages = max_pages
@@ -49,6 +49,11 @@ class OptimizedCareerSpider(scrapy.Spider):
         self.domain = None
         self.start_time = time.time()
         
+        # Contact extraction data
+        self.all_emails = set()
+        self.all_phones = set()
+        self.all_contact_urls = set()
+    
     def start_requests(self):
         """
         Bắt đầu crawl với priority cao nhất
@@ -87,7 +92,7 @@ class OptimizedCareerSpider(scrapy.Spider):
             logger.info(f"🎯 Processing priority {priority} with {len(links)} links")
             # Chỉ crawl tối đa 3 links mỗi priority để tăng tốc
             for link in links[:3]:
-                if self.crawled_pages >= self.max_pages or self.found_career_pages >= 2:
+                if self.crawled_pages >= self.max_pages or self.found_career_pages >= 5:
                     logger.info(f"⏹️ Reached limit: pages={self.crawled_pages}, career_pages={self.found_career_pages}")
                     should_break = True
                     break
@@ -247,23 +252,34 @@ class OptimizedCareerSpider(scrapy.Spider):
     
     def parse_page(self, response):
         """
-        Parse từng trang với detection tối ưu
+        Parse từng trang với detection tối ưu và contact extraction
         """
         priority = response.meta.get('priority', 10)
         
         logger.info(f"📄 Crawling page {self.crawled_pages + 1}/{self.max_pages}: {response.url} (priority: {priority})")
         
+        # Extract contact info from this page
+        contact_info = self.extract_contact_info(response)
+        
+        # Add to global contact data
+        self.all_emails.update(contact_info['emails'])
+        self.all_phones.update(contact_info['phones'])
+        self.all_contact_urls.update(contact_info['contact_urls'])
+        
+        logger.info(f"📧 Page {response.url}: Found {len(contact_info['emails'])} emails, {len(contact_info['phones'])} phones")
+        
         # Kiểm tra có phải career listing page không
         if self.is_career_listing_page(response):
             career_score = self.calculate_career_score(response)
             
-            if career_score >= 0.6:  # Threshold cao hơn để chính xác
+            if career_score >= 0.3:  # Lower threshold to find more career pages
                 career_page = {
                     'url': response.url,
                     'title': response.css('title::text').get() or '',
                     'confidence': career_score,
                     'indicators': self.get_career_indicators(response),
-                    'priority_found': priority
+                    'priority_found': priority,
+                    'contact_info': contact_info  # Include contact info for this career page
                 }
                 
                 self.career_pages.append(career_page)
@@ -275,7 +291,7 @@ class OptimizedCareerSpider(scrapy.Spider):
         self.crawled_pages += 1
         
         # Dừng sớm nếu đã tìm thấy đủ career pages
-        if self.found_career_pages >= 2:  # Giảm từ 3 xuống 2
+        if self.found_career_pages >= 5:  # Increase from 2 to 5
             logger.info(f"⏹️ Stopping crawl: Found enough career pages ({self.found_career_pages})")
             return
         
@@ -295,7 +311,7 @@ class OptimizedCareerSpider(scrapy.Spider):
                     break
                     
                 for link in link_list[:1]:  # Chỉ crawl 1 link mỗi priority để tăng tốc
-                    if self.crawled_pages >= self.max_pages or self.found_career_pages >= 2:
+                    if self.crawled_pages >= self.max_pages or self.found_career_pages >= 5:
                         should_break = True
                         break
                         
@@ -451,7 +467,14 @@ class OptimizedCareerSpider(scrapy.Spider):
                     'priority_found': 0
                 })
         
-        # Tạo result chỉ với career pages
+        # Prepare contact info (already deduplicated by using sets)
+        contact_info = {
+            'emails': sorted(list(self.all_emails)),  # Convert set to sorted list
+            'phones': sorted(list(self.all_phones)),  # Convert set to sorted list
+            'contact_urls': sorted(list(self.all_contact_urls))  # Convert set to sorted list
+        }
+        
+        # Tạo result với cả career pages và contact info
         result = {
             'success': True,
             'requested_url': self.start_urls[0] if self.start_urls else '',
@@ -459,7 +482,8 @@ class OptimizedCareerSpider(scrapy.Spider):
             'total_pages_crawled': self.crawled_pages,
             'career_pages_found': len(career_pages_data),
             'crawl_time': time.time() - self.start_time,
-            'crawl_method': 'scrapy_optimized'
+            'crawl_method': 'scrapy_optimized',
+            'contact_info': contact_info  # Include contact info
         }
         
         # Ghi result vào file
@@ -470,13 +494,73 @@ class OptimizedCareerSpider(scrapy.Spider):
             with open(result_file, 'w', encoding='utf-8') as f:
                 json.dump(result, f, ensure_ascii=False, indent=2)
             logger.info(f"✅ Result saved to: {result_file}")
+            logger.info(f"📊 Contact info: {len(contact_info['emails'])} emails, {len(contact_info['phones'])} phones")
         except Exception as e:
             logger.error(f"❌ Error saving result: {e}")
         
         return result
 
+    def extract_contact_info(self, response) -> Dict:
+        """
+        Extract contact information from page content
+        """
+        content = response.text
+        url = response.url
+        
+        # Extract emails using regex
+        import re
+        email_patterns = [
+            r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b',
+            r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
+        ]
+        
+        emails = []
+        for pattern in email_patterns:
+            found_emails = re.findall(pattern, content, re.IGNORECASE)
+            emails.extend(found_emails)
+        
+        # Clean and validate emails
+        valid_emails = []
+        for email in emails:
+            email = email.strip().lower()
+            if '@' in email and '.' in email.split('@')[1]:
+                # Skip common invalid patterns
+                if not any(invalid in email for invalid in [
+                    'cropped-favicon', 'favicon', '.png', '.jpg', '.jpeg', '.gif',
+                    'data:', 'javascript:', 'mailto:', 'tel:', 'http', 'https'
+                ]):
+                    valid_emails.append(email)
+        
+        # Extract phone numbers
+        phone_patterns = [
+            r'\+84\s?\d{1,2}\s?\d{3}\s?\d{3}\s?\d{3}',
+            r'0\d{1,2}\s?\d{3}\s?\d{3}\s?\d{3}',
+            r'\d{10,11}',
+        ]
+        
+        phones = []
+        for pattern in phone_patterns:
+            found_phones = re.findall(pattern, content)
+            phones.extend(found_phones)
+        
+        # Extract contact-related URLs
+        contact_urls = []
+        for link in response.css('a[href]::attr(href)').getall():
+            if link:
+                full_url = response.urljoin(link)
+                url_lower = full_url.lower()
+                contact_keywords = ['contact', 'about', 'team', 'company', 'lien-he', 'gioi-thieu']
+                if any(keyword in url_lower for keyword in contact_keywords):
+                    contact_urls.append(full_url)
+        
+        return {
+            'emails': valid_emails,
+            'phones': phones,
+            'contact_urls': contact_urls
+        }
+
 # Hàm chạy spider
-async def run_optimized_career_spider(url: str, max_pages: int = 100) -> Dict:
+async def run_optimized_career_spider(url: str, max_pages: int = 150) -> Dict:
     """
     Chạy optimized Scrapy spider bằng subprocess để tránh reactor conflicts
     """

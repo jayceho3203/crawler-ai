@@ -51,31 +51,68 @@ async def detect_career_pages_scrapy(request: CareerPagesRequest):
         result = await career_pages_service.detect_career_pages(
             url=request.url,
             include_subdomain_search=request.include_subdomain_search,
-            max_pages_to_scan=min(request.max_pages_to_scan, 15),  # Limit to 15 pages max
+            max_pages_to_scan=min(request.max_pages_to_scan, 50),  # Increase limit to 50 pages max
             strict_filtering=request.strict_filtering,
             include_job_boards=request.include_job_boards,
             use_scrapy=True  # Force Scrapy
         )
         
-        # If career pages found, extract contact info from the same crawl data
+        # Extract contact info from Scrapy spider result
         contact_info = None
-        if result.get('success') and result.get('career_pages'):
-            logger.info(f"🎯 Career pages found! Extracting contact info from existing data for: {request.url}")
+        logger.info(f"🎯 Processing contact info from Scrapy spider")
+        
+        # Check if Scrapy result contains contact info
+        if result.get('success') and result.get('contact_info'):
+            logger.info(f"✅ Using contact info from Scrapy spider")
+            scrapy_contact = result['contact_info']
+            
+            # Convert to format expected by contact extractor
+            extracted_data = []
+            
+            # Add emails from Scrapy (already deduplicated)
+            emails = scrapy_contact.get("emails", [])
+            logger.info(f"📧 Scrapy found {len(emails)} emails: {emails}")
+            for email in emails:
+                extracted_data.append({
+                    "label": "email",
+                    "value": email
+                })
+            
+            # Add phones from Scrapy (already deduplicated)
+            phones = scrapy_contact.get("phones", [])
+            logger.info(f"📞 Scrapy found {len(phones)} phones: {phones}")
+            for phone in phones:
+                extracted_data.append({
+                    "label": "phone",
+                    "value": phone
+                })
+            
+            # Add contact URLs from Scrapy (already deduplicated)
+            contact_urls = scrapy_contact.get("contact_urls", [])
+            logger.info(f"🔗 Scrapy found {len(contact_urls)} contact URLs")
+            for url_item in contact_urls:
+                extracted_data.append({
+                    "label": "url",
+                    "value": url_item
+                })
+            
+            # Process the extracted data
+            from ..utils.contact_extractor import process_extracted_crawl_results
+            contact_info = process_extracted_crawl_results(extracted_data, request.url)
+            logger.info(f"✅ Contact info processed from Scrapy: {contact_info}")
+        else:
+            logger.info(f"⚠️ No contact info from Scrapy, using fallback")
+            # Simple fallback - just crawl main page
             try:
-                # Use the same crawl data instead of crawling again
-                from ..utils.contact_extractor import process_extracted_crawl_results
+                from ..services.crawler import crawl_single_url
+                main_crawl_result = await crawl_single_url(request.url)
                 
-                # Extract contact info from the same HTML content that Scrapy already crawled
-                if hasattr(result, 'raw_html') and result.get('raw_html'):
-                    # Process the same HTML content
-                    from ..services.crawler import extract_with_playwright
-                    crawl_result = await extract_with_playwright(request.url)
-                    
-                    # Convert to format expected by contact extractor
+                if main_crawl_result['success']:
                     extracted_data = []
                     
                     # Add emails
-                    emails = crawl_result.get("emails", [])
+                    emails = main_crawl_result.get("emails", [])
+                    logger.info(f"📧 Fallback found {len(emails)} emails: {emails}")
                     for email in emails:
                         extracted_data.append({
                             "label": "email",
@@ -83,35 +120,37 @@ async def detect_career_pages_scrapy(request: CareerPagesRequest):
                         })
                     
                     # Add phones
-                    phones = crawl_result.get("phones", [])
+                    phones = main_crawl_result.get("phones", [])
+                    logger.info(f"📞 Fallback found {len(phones)} phones: {phones}")
                     for phone in phones:
                         extracted_data.append({
                             "label": "phone",
                             "value": phone
                         })
                     
-                    # Add URLs - only contact-related URLs
-                    urls = crawl_result.get("urls", [])
+                    # Add contact URLs
+                    urls = main_crawl_result.get("urls", [])
+                    contact_urls = []
                     for url_item in urls:
                         url_lower = url_item.lower()
-                        # Only include contact-related URLs
                         contact_keywords = ['contact', 'about', 'team', 'company', 'lien-he', 'gioi-thieu']
                         is_contact_related = any(keyword in url_lower for keyword in contact_keywords)
-                        
                         if is_contact_related:
+                            contact_urls.append(url_item)
                             extracted_data.append({
                                 "label": "url",
                                 "value": url_item
                             })
                     
-                    # Process the extracted data
+                    logger.info(f"🔗 Fallback found {len(contact_urls)} contact URLs")
+                    
+                    from ..utils.contact_extractor import process_extracted_crawl_results
                     contact_info = process_extracted_crawl_results(extracted_data, request.url)
-                    logger.info(f"✅ Contact info extracted from existing crawl data")
+                    logger.info(f"✅ Contact info from fallback: {contact_info}")
                 else:
-                    # Fallback to separate crawl if no raw HTML
-                    from ..utils.contact_extractor import extract_contact_info_from_url
-                    contact_info = await extract_contact_info_from_url(request.url)
-                    logger.info(f"✅ Contact info extracted with fallback method")
+                    logger.warning(f"⚠️ Fallback crawl failed: {main_crawl_result.get('error_message', 'Unknown error')}")
+                    contact_info = None
+                    
             except Exception as contact_error:
                 logger.warning(f"⚠️ Contact extraction failed: {contact_error}")
                 contact_info = None
@@ -265,11 +304,11 @@ async def extract_contact_info(request: dict):
             return {"error": "URL is required"}
         
         # Use existing crawler service to extract contact info
-        from app.services.crawler import extract_with_playwright
+        from app.services.crawler import crawl_single_url
         from app.utils.contact_extractor import process_extracted_crawl_results
         
         # Crawl the website
-        crawl_result = await extract_with_playwright(url)
+        crawl_result = await crawl_single_url(url)
         
         # Convert to format expected by contact extractor
         extracted_data = []
