@@ -102,58 +102,54 @@ async def detect_career_pages_scrapy(request: CareerPagesRequest):
             logger.info(f"✅ Contact info processed from Scrapy: {contact_info}")
         else:
             logger.info(f"⚠️ No contact info from Scrapy, using fallback")
-            # Simple fallback - just crawl main page
+            # Prefer enhanced contact service with deep-crawl over simple main-page parse
             try:
-                from ..services.crawler import crawl_single_url
-                main_crawl_result = await crawl_single_url(request.url)
-                
-                if main_crawl_result['success']:
-                    extracted_data = []
-                    
-                    # Add emails
-                    emails = main_crawl_result.get("emails", [])
-                    logger.info(f"📧 Fallback found {len(emails)} emails: {emails}")
-                    for email in emails:
-                        extracted_data.append({
-                            "label": "email",
-                            "value": email
-                        })
-                    
-                    # Add phones
-                    phones = main_crawl_result.get("phones", [])
-                    logger.info(f"📞 Fallback found {len(phones)} phones: {phones}")
-                    for phone in phones:
-                        extracted_data.append({
-                            "label": "phone",
-                            "value": phone
-                        })
-                    
-                    # Add contact URLs
-                    urls = main_crawl_result.get("urls", [])
-                    contact_urls = []
-                    for url_item in urls:
-                        url_lower = url_item.lower()
-                        contact_keywords = ['contact', 'about', 'team', 'company', 'lien-he', 'gioi-thieu']
-                        is_contact_related = any(keyword in url_lower for keyword in contact_keywords)
-                        if is_contact_related:
-                            contact_urls.append(url_item)
-                            extracted_data.append({
-                                "label": "url",
-                                "value": url_item
-                            })
-                    
-                    logger.info(f"🔗 Fallback found {len(contact_urls)} contact URLs")
-                    
-                    from ..utils.contact_extractor import process_extracted_crawl_results
-                    contact_info = process_extracted_crawl_results(extracted_data, request.url)
-                    logger.info(f"✅ Contact info from fallback: {contact_info}")
-                else:
-                    logger.warning(f"⚠️ Fallback crawl failed: {main_crawl_result.get('error_message', 'Unknown error')}")
-                    contact_info = None
-                    
+                enhanced = await contact_service.extract_contact_info(
+                    url=request.url,
+                    include_social=True,
+                    include_emails=True,
+                    include_phones=True,
+                    max_depth=2,
+                )
+                contact_info = {
+                    "emails": enhanced.get("emails", []),
+                    "phones": enhanced.get("phones", []),
+                    "social_links": enhanced.get("social_links", []),
+                    "contact_forms": enhanced.get("contact_forms", []),
+                    "website": request.url,
+                }
+                logger.info(f"✅ Contact info from enhanced fallback: {contact_info}")
             except Exception as contact_error:
                 logger.warning(f"⚠️ Contact extraction failed: {contact_error}")
                 contact_info = None
+
+        # If Scrapy provided contact_info but it's empty, enhance with deep-crawl service
+        try:
+            needs_enhance = (
+                contact_info is None or (
+                    isinstance(contact_info, dict)
+                    and not contact_info.get("emails")
+                    and not contact_info.get("phones")
+                )
+            )
+            if needs_enhance:
+                enhanced = await contact_service.extract_contact_info(
+                    url=request.url,
+                    include_social=True,
+                    include_emails=True,
+                    include_phones=True,
+                    max_depth=2,
+                )
+                contact_info = {
+                    "emails": enhanced.get("emails", []),
+                    "phones": enhanced.get("phones", []),
+                    "social_links": enhanced.get("social_links", []),
+                    "contact_forms": enhanced.get("contact_forms", []),
+                    "website": request.url,
+                }
+                logger.info("🔁 Enhanced contact info by deep-crawling contact/about pages")
+        except Exception as enhance_error:
+            logger.warning(f"⚠️ Enhancement step failed: {enhance_error}")
         
         # Add contact info to response
         response_data = result.copy()
@@ -293,7 +289,7 @@ async def ai_agent_analysis(request: AIAgentRequest):
             'timestamp': datetime.now().isoformat()
         }
 
-@router.post("/api/v1/extract_contact_info")
+@router.post("/api/v1/extract_contact_info", response_model=ContactInfoResponse)
 async def extract_contact_info(request: dict):
     """
     Extract contact information from company website
@@ -303,66 +299,46 @@ async def extract_contact_info(request: dict):
         if not url:
             return {"error": "URL is required"}
         
-        # Use existing crawler service to extract contact info
-        from app.services.crawler import crawl_single_url
-        from app.utils.contact_extractor import process_extracted_crawl_results
-        
-        # Crawl the website
-        crawl_result = await crawl_single_url(url)
-        
-        # Convert to format expected by contact extractor
-        extracted_data = []
-        
-        # Add emails
-        emails = crawl_result.get("emails", [])
-        for email in emails:
-            extracted_data.append({
-                "label": "email",
-                "value": email
-            })
-        
-        # Add phones
-        phones = crawl_result.get("phones", [])
-        for phone in phones:
-            extracted_data.append({
-                "label": "phone",
-                "value": phone
-            })
-        
-        # Only add contact-related URLs, not all URLs
-        urls = crawl_result.get("urls", [])
-        for url_item in urls:
-            url_lower = url_item.lower()
-            # Only include contact-related URLs
-            contact_keywords = ['contact', 'about', 'team', 'company', 'lien-he', 'gioi-thieu']
-            is_contact_related = any(keyword in url_lower for keyword in contact_keywords)
-            
-            if is_contact_related:
-                extracted_data.append({
-                    "label": "url",
-                    "value": url_item
-                })
-        
-        # Process the extracted data
-        contact_info = process_extracted_crawl_results(extracted_data, url)
-        
-        return {
-            "success": True,
-            "data": contact_info
-        }
+        # Prefer our enhanced extractor which deep-crawls contact/about pages
+        result = await contact_service.extract_contact_info(
+            url=url,
+            include_social=True,
+            include_emails=True,
+            include_phones=True,
+            max_depth=2,
+        )
+
+        return ContactInfoResponse(
+            requested_url=url,
+            success=result.get("success", False),
+            error_message=result.get("error_message"),
+            crawl_time=result.get("crawl_time"),
+            crawl_method=result.get("crawl_method"),
+            emails=result.get("emails", []),
+            phones=result.get("phones", []),
+            social_links=result.get("social_links", []),
+            contact_forms=result.get("contact_forms", []),
+            raw_extracted_data=result.get("raw_extracted_data"),
+            total_pages_crawled=result.get("total_pages_crawled", 0),
+            total_links_found=result.get("total_links_found", 0),
+        )
         
     except Exception as e:
         logger.error(f"Error extracting contact info from {url}: {e}")
-        return {
-            "success": False,
-            "error": str(e),
-            "data": {
-                "emails": [],
-                "phones": [],
-                "social_links": [],
-                "website": url
-            }
-        }
+        return ContactInfoResponse(
+            requested_url=url or "",
+            success=False,
+            error_message=str(e),
+            crawl_time=None,
+            crawl_method=None,
+            emails=[],
+            phones=[],
+            social_links=[],
+            contact_forms=[],
+            raw_extracted_data=None,
+            total_pages_crawled=0,
+            total_links_found=0,
+        )
 
 @router.get("/health")
 async def health_check():

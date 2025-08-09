@@ -100,7 +100,7 @@ class ContactExtractorService:
                 'success': True,
                 'requested_url': url,
                 'crawl_time': crawl_time,
-                'crawl_method': result.get('method'),
+                'crawl_method': result.get('crawl_method') or result.get('method'),
                 'emails': classified_contacts.get('emails', []),
                 'phones': contact_data.get('phones', []),
                 'social_links': classified_contacts.get('social_links', []),
