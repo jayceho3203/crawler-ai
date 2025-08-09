@@ -20,9 +20,9 @@ from ..utils.constants import (
 
 logger = logging.getLogger(__name__)
 
-# Tối ưu timeout cho performance
-OPTIMIZED_TIMEOUT = 15000  # 15 seconds
-PAGE_WAIT_TIMEOUT = 200  # 200ms
+# Tối ưu timeout cho performance (một số site cần lâu hơn để vượt anti-bot)
+OPTIMIZED_TIMEOUT = 45000  # 45 seconds
+PAGE_WAIT_TIMEOUT = 300  # 300ms
 
 async def extract_with_playwright(url: str) -> Dict:
     """Primary method using Playwright for JavaScript rendering and dynamic content"""
@@ -55,27 +55,44 @@ async def extract_with_playwright(url: str) -> Dict:
                 ]
             )
             
-            # Create context with optimized settings
+            # Create context with optimized settings + basic stealth
             context = await browser.new_context(
                 viewport={'width': 1280, 'height': 720},
                 user_agent=DEFAULT_USER_AGENT,
                 extra_http_headers=DEFAULT_HEADERS,
                 ignore_https_errors=True  # Ignore SSL certificate errors
             )
+            # Basic stealth to reduce headless detection
+            await context.add_init_script(
+                """
+                // webdriver flag
+                Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+                // chrome runtime
+                window.chrome = { runtime: {} };
+                // languages
+                Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
+                // plugins length
+                Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
+                """
+            )
             
             page = await context.new_page()
             
-            # Block unnecessary resources for faster loading
-            await page.route("**/*.{png,jpg,jpeg,gif,svg,woff,woff2,ttf,css,js,ico}", lambda route: route.abort())
+            # Block only heavy media resources (keep JS/CSS to avoid anti-bot issues)
+            await page.route("**/*.{png,jpg,jpeg,gif,svg,webp,ico,woff,woff2,ttf}", lambda route: route.abort())
             
             # Navigate to URL with optimized timeout
             logger.info(f"🌐 Playwright navigating to: {url}")
-            response = await page.goto(url, wait_until='domcontentloaded', timeout=OPTIMIZED_TIMEOUT)
+            try:
+                response = await page.goto(url, wait_until='domcontentloaded', timeout=OPTIMIZED_TIMEOUT)
+            except Exception:
+                # Retry with a different wait strategy
+                response = await page.goto(url, wait_until='load', timeout=OPTIMIZED_TIMEOUT)
             
             if not response or response.status >= 400:
                 raise Exception(f"HTTP {response.status if response else 'Unknown'}")
             
-            # Giảm thời gian chờ xuống 200ms
+            # Small wait to let dynamic content settle
             await page.wait_for_timeout(PAGE_WAIT_TIMEOUT)
             
             # Extract HTML content
@@ -182,12 +199,16 @@ async def extract_with_playwright(url: str) -> Dict:
         }
 
 async def extract_with_requests(url: str) -> Dict:
-    """Fallback method using aiohttp with enhanced filtering"""
+    """Fallback method using aiohttp with enhanced filtering and anti-bot headers"""
     start_time = time.time()
     
     try:
         headers = {
             'User-Agent': DEFAULT_USER_AGENT,
+            'Referer': url,
+            'Cache-Control': 'no-cache',
+            'Pragma': 'no-cache',
+            'DNT': '1',
             **DEFAULT_HEADERS
         }
         
@@ -200,7 +221,7 @@ async def extract_with_requests(url: str) -> Dict:
         connector = aiohttp.TCPConnector(ssl=ssl_context)
         
         async with aiohttp.ClientSession(connector=connector) as session:
-            async with session.get(url, headers=headers, timeout=30) as response:
+            async with session.get(url, headers=headers, timeout=40, allow_redirects=True) as response:
                 response.raise_for_status()
                 html_content = await response.text()
                 
