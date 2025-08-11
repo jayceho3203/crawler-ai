@@ -130,7 +130,6 @@ async def root():
             "health": "/health",
             "docs": "/docs",
             "career_pages": "/api/v1/detect_career_pages_scrapy",
-            "contact_info": "/api/v1/extract_contact_info",
             "job_urls": "/api/v1/extract_job_urls",
             "job_details": "/api/v1/extract_job_details",
             "ai_analysis": "/api/v1/ai_agent_analysis"

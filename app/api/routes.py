@@ -289,56 +289,8 @@ async def ai_agent_analysis(request: AIAgentRequest):
             'timestamp': datetime.now().isoformat()
         }
 
-@router.post("/api/v1/extract_contact_info", response_model=ContactInfoResponse)
-async def extract_contact_info(request: dict):
-    """
-    Extract contact information from company website
-    """
-    try:
-        url = request.get("url")
-        if not url:
-            return {"error": "URL is required"}
-        
-        # Prefer our enhanced extractor which deep-crawls contact/about pages
-        result = await contact_service.extract_contact_info(
-            url=url,
-            include_social=True,
-            include_emails=True,
-            include_phones=True,
-            max_depth=2,
-        )
-
-        return ContactInfoResponse(
-            requested_url=url,
-            success=result.get("success", False),
-            error_message=result.get("error_message"),
-            crawl_time=result.get("crawl_time"),
-            crawl_method=result.get("crawl_method"),
-            emails=result.get("emails", []),
-            phones=result.get("phones", []),
-            social_links=result.get("social_links", []),
-            contact_forms=result.get("contact_forms", []),
-            raw_extracted_data=result.get("raw_extracted_data"),
-            total_pages_crawled=result.get("total_pages_crawled", 0),
-            total_links_found=result.get("total_links_found", 0),
-        )
-        
-    except Exception as e:
-        logger.error(f"Error extracting contact info from {url}: {e}")
-        return ContactInfoResponse(
-            requested_url=url or "",
-            success=False,
-            error_message=str(e),
-            crawl_time=None,
-            crawl_method=None,
-            emails=[],
-            phones=[],
-            social_links=[],
-            contact_forms=[],
-            raw_extracted_data=None,
-            total_pages_crawled=0,
-            total_links_found=0,
-        )
+# Contact info extraction is now integrated into detect_career_pages_scrapy endpoint
+# No need for separate extract_contact_info endpoint
 
 @router.get("/health")
 async def health_check():
