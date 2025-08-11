@@ -151,7 +151,7 @@ class CareerPagesService:
             }
     
     async def _analyze_url_for_career(self, url: str, base_url: str, strict_filtering: bool) -> Dict:
-        """Analyze a single URL for career page indicators"""
+        """Analyze a single URL for career page indicators with improved scoring and validation"""
         analysis = {
             'url': url,
             'is_career_page': False,
@@ -172,31 +172,43 @@ class CareerPagesService:
             path = parsed.path.lower()
             domain = parsed.netloc.lower()
             
-            # Check for career keywords in path (higher weight for exact matches)
+            # IMPROVED SCORING SYSTEM (Cách 1)
             career_indicators = []
-            for keyword in self.career_keywords:
-                if keyword in path:
-                    # Higher confidence for exact career keywords
-                    if keyword in ['career', 'careers', 'jobs', 'employment', 'tuyen-dung', 'viec-lam']:
-                        career_indicators.append(f"Exact career keyword: '{keyword}'")
-                        analysis['confidence'] += 0.6
-                    else:
-                        career_indicators.append(f"Path contains '{keyword}'")
-                        analysis['confidence'] += 0.2
             
-            # Check for career keywords in domain (lower weight)
+            # 1. Exact career keywords (HIGHEST WEIGHT)
+            exact_career_keywords = ['career', 'careers', 'jobs', 'employment', 'tuyen-dung', 'viec-lam']
+            for keyword in exact_career_keywords:
+                if keyword in path:
+                    career_indicators.append(f"Exact career keyword: '{keyword}'")
+                    analysis['confidence'] += 1.0  # Tăng từ 0.6 lên 1.0
+            
+            # 2. Generic keywords (LOWER WEIGHT)
+            generic_keywords = ['dev', 'software', 'tech', 'ml', 'ai', 'testing']
+            for keyword in generic_keywords:
+                if keyword in path:
+                    career_indicators.append(f"Path contains '{keyword}'")
+                    analysis['confidence'] += 0.1  # Giảm từ 0.2 xuống 0.1
+            
+            # 3. Career patterns (HIGH WEIGHT)
+            career_patterns = ['/career', '/careers', '/jobs', '/employment', '/tuyen-dung', '/viec-lam']
+            for pattern in career_patterns:
+                if pattern in path:
+                    career_indicators.append(f"Career pattern: {pattern}")
+                    analysis['confidence'] += 0.8  # Tăng từ 0.4 lên 0.8
+            
+            # 4. Domain keywords (LOW WEIGHT)
             for keyword in self.career_keywords:
                 if keyword in domain:
                     career_indicators.append(f"Domain contains '{keyword}'")
-                    analysis['confidence'] += 0.1
+                    analysis['confidence'] += 0.05  # Giảm từ 0.1 xuống 0.05
             
-            # Check for job board domains
+            # 5. Job board domains
             for job_board in self.job_board_domains:
                 if job_board in domain:
                     career_indicators.append(f"Job board domain: {job_board}")
                     analysis['confidence'] += 0.5
             
-            # Check path depth (career pages are usually shallow)
+            # 6. Path depth
             path_depth = len([p for p in path.split('/') if p])
             if path_depth <= 2:
                 career_indicators.append("Shallow path depth")
@@ -205,35 +217,40 @@ class CareerPagesService:
                 analysis['rejection_reason'] = 'Path too deep'
                 return analysis
             
-            # Check for common career page patterns
-            career_patterns = [
-                '/career', '/careers', '/jobs', '/employment',
-                '/tuyen-dung', '/viec-lam', '/co-hoi',
-                '/career/', '/jobs/', '/employment/'
-            ]
+            # IMPROVED NON-CAREER PENALTIES
+            non_career_patterns = {
+                '/product': -0.5,      # Tăng penalty
+                '/service': -0.5,      # Tăng penalty
+                '/news': -0.4,         # Tăng penalty
+                '/blog': -0.4,         # Tăng penalty
+                '/article': -0.4,      # Tăng penalty
+                '/about': -0.3,        # Giữ nguyên
+                '/contact': -0.3,      # Giữ nguyên
+                '/admin': -0.8,        # Tăng penalty
+                '/login': -0.8,        # Tăng penalty
+            }
             
-            for pattern in career_patterns:
+            for pattern, penalty in non_career_patterns.items():
                 if pattern in path:
-                    career_indicators.append(f"Career pattern: {pattern}")
-                    analysis['confidence'] += 0.4
+                    analysis['confidence'] += penalty
+                    if penalty <= -0.5:  # Strong penalty
+                        analysis['rejection_reason'] = f'Strong non-career pattern: {pattern}'
             
-            # Check for non-career indicators
-            non_career_patterns = [
-                '/admin', '/login', '/register', '/cart', '/checkout',
-                '/product', '/service', '/blog', '/news', '/article',
-                '/about', '/contact', '/privacy', '/terms'
-            ]
-            
-            for pattern in non_career_patterns:
-                if pattern in path:
-                    analysis['rejection_reason'] = f'Non-career pattern: {pattern}'
-                    analysis['confidence'] -= 0.3
-            
-            # Determine if it's a career page (higher threshold for accuracy)
-            if analysis['confidence'] >= 0.7:
+            # IMPROVED VALIDATION LOGIC (Cách 2)
+            # Nếu confidence rất cao, luôn accept (bỏ qua strict validation)
+            if analysis['confidence'] >= 1.5:
                 analysis['is_career_page'] = True
-            elif analysis['confidence'] >= 0.4:
+                analysis['is_potential'] = False
+                analysis['rejection_reason'] = None  # Clear rejection reason
+            elif analysis['confidence'] >= 1.0:
+                analysis['is_career_page'] = True
+                analysis['is_potential'] = False
+            elif analysis['confidence'] >= 0.6:
                 analysis['is_potential'] = True
+            elif analysis['confidence'] < 0.0:
+                # Nếu confidence âm, reject
+                if not analysis['rejection_reason']:
+                    analysis['rejection_reason'] = 'Low confidence score'
             
             analysis['indicators'] = career_indicators
             
