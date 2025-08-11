@@ -341,19 +341,27 @@ async def crawl_single_url(url: str) -> Dict:
     if cached:
         return cached
     
-    # Try Playwright first (if available)
-    try:
-        logger.info(f"🚀 Starting Playwright crawl for: {url}")
-        result = await extract_with_playwright(url)
-        
-        # If Playwright fails, try requests
-        if not result.get("success"):
-            logger.info(f"🔄 Playwright failed, trying requests fallback for: {url}")
-            result = await extract_with_requests(url)
-    except Exception as e:
-        logger.warning(f"⚠️ Playwright not available, using requests fallback: {e}")
-        # If Playwright fails to start (no browser), use requests directly
+    # Check if Playwright is disabled
+    import os
+    disable_playwright = os.getenv("DISABLE_PLAYWRIGHT", "0") == "1"
+    
+    if disable_playwright:
+        logger.info(f"🚫 Playwright disabled, using requests for: {url}")
         result = await extract_with_requests(url)
+    else:
+        # Try Playwright first (if available)
+        try:
+            logger.info(f"🚀 Starting Playwright crawl for: {url}")
+            result = await extract_with_playwright(url)
+            
+            # If Playwright fails, try requests
+            if not result.get("success"):
+                logger.info(f"🔄 Playwright failed, trying requests fallback for: {url}")
+                result = await extract_with_requests(url)
+        except Exception as e:
+            logger.warning(f"⚠️ Playwright not available, using requests fallback: {e}")
+            # If Playwright fails to start (no browser), use requests directly
+            result = await extract_with_requests(url)
     
     # Cache the result
     cache_result(url, result)
