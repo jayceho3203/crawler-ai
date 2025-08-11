@@ -172,18 +172,23 @@ class CareerPagesService:
             path = parsed.path.lower()
             domain = parsed.netloc.lower()
             
-            # Check for career keywords in path
+            # Check for career keywords in path (higher weight for exact matches)
             career_indicators = []
             for keyword in self.career_keywords:
                 if keyword in path:
-                    career_indicators.append(f"Path contains '{keyword}'")
-                    analysis['confidence'] += 0.3
+                    # Higher confidence for exact career keywords
+                    if keyword in ['career', 'careers', 'jobs', 'employment', 'tuyen-dung', 'viec-lam']:
+                        career_indicators.append(f"Exact career keyword: '{keyword}'")
+                        analysis['confidence'] += 0.6
+                    else:
+                        career_indicators.append(f"Path contains '{keyword}'")
+                        analysis['confidence'] += 0.2
             
-            # Check for career keywords in domain
+            # Check for career keywords in domain (lower weight)
             for keyword in self.career_keywords:
                 if keyword in domain:
                     career_indicators.append(f"Domain contains '{keyword}'")
-                    analysis['confidence'] += 0.2
+                    analysis['confidence'] += 0.1
             
             # Check for job board domains
             for job_board in self.job_board_domains:
@@ -224,10 +229,10 @@ class CareerPagesService:
                     analysis['rejection_reason'] = f'Non-career pattern: {pattern}'
                     analysis['confidence'] -= 0.3
             
-            # Determine if it's a career page
-            if analysis['confidence'] >= 0.5:
+            # Determine if it's a career page (higher threshold for accuracy)
+            if analysis['confidence'] >= 0.7:
                 analysis['is_career_page'] = True
-            elif analysis['confidence'] >= 0.2:
+            elif analysis['confidence'] >= 0.4:
                 analysis['is_potential'] = True
             
             analysis['indicators'] = career_indicators
