@@ -40,7 +40,12 @@ advanced_job_finder = AdvancedJobFinder()
 # Essential endpoints for N8N workflow
 
 @router.post("/detect_career_pages_scrapy", response_model=CareerPagesResponse)
-async def detect_career_pages_scrapy(request: CareerPagesRequest):
+async def detect_career_pages_scrapy_alias(request: CareerPagesRequest):
+    """Alias endpoint to avoid 404 errors"""
+    return await detect_career_pages_scrapy_main(request)
+
+@router.post("/api/v1/detect_career_pages_scrapy", response_model=CareerPagesResponse)
+async def detect_career_pages_scrapy_main(request: CareerPagesRequest):
     """
     Detect career pages using optimized Scrapy spider + Extract contact info if career pages found
     """

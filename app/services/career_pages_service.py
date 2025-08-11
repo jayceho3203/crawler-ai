@@ -12,7 +12,7 @@ from datetime import datetime
 from ..utils.constants import CAREER_KEYWORDS_VI, CAREER_SELECTORS, JOB_BOARD_DOMAINS
 from ..services.career_detector import filter_career_urls
 from .crawler import crawl_single_url
-from .scrapy_career_spider import run_optimized_career_spider
+from .scrapy_runner import run_spider
 
 logger = logging.getLogger(__name__)
 
@@ -404,8 +404,8 @@ class CareerPagesService:
         try:
             logger.info(f"🚀 Running optimized Scrapy spider for: {url}")
             
-            # Run Scrapy spider
-            result = await run_optimized_career_spider(url, max_pages)
+            # Run Scrapy spider using new runner
+            result = await run_spider(url, max_pages)
             
             # Debug log
             logger.info(f"🔍 Scrapy result type: {type(result)}")

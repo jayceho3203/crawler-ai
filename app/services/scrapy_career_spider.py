@@ -624,16 +624,16 @@ async def run_optimized_career_spider(url: str, max_pages: int = 150) -> Dict:
         # Tạo unique result file
         result_file = f'scrapy_result_{int(time.time())}.json'
         
-        # Tạo temporary script để chạy Scrapy
+        # Tạo temporary script để chạy Scrapy với in-memory result
         script_content = f'''
 import sys
 import os
+import json
 sys.path.append(os.getcwd())
 
 from scrapy.crawler import CrawlerProcess
 from scrapy.utils.project import get_project_settings
 from app.services.scrapy_career_spider import OptimizedCareerSpider
-import json
 
 # Cấu hình settings - TẮT HOÀN TOÀN FeedExporter
 settings = get_project_settings()
@@ -649,9 +649,33 @@ settings.update({{
     'FEED_EXPORT_INDENT': 2
 }})
 
-# Chạy spider - truyền class, không phải instance
+# Custom spider runner để capture result
+class ResultCaptureSpider(OptimizedCareerSpider):
+    def closed(self, reason):
+        # Override closed method để capture result
+        result = {{
+            'success': True,
+            'requested_url': '{url}',
+            'career_pages': self.career_pages,
+            'total_pages_crawled': self.crawled_pages,
+            'career_pages_found': self.found_career_pages,
+            'crawl_time': 0,
+            'crawl_method': 'scrapy_optimized',
+            'contact_info': {{
+                'emails': list(self.all_emails),
+                'phones': list(self.all_phones),
+                'contact_urls': list(self.all_contact_urls)
+            }}
+        }}
+        # Print result as JSON to stdout
+        print("SPIDER_RESULT_START")
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        print("SPIDER_RESULT_END")
+        super().closed(reason)
+
+# Chạy spider với custom class
 process = CrawlerProcess(settings)
-process.crawl(OptimizedCareerSpider, start_url='{url}', max_pages={max_pages})
+process.crawl(ResultCaptureSpider, start_url='{url}', max_pages={max_pages})
 process.start()
 
 print("Scrapy completed successfully")
@@ -691,33 +715,28 @@ print("Scrapy completed successfully")
                 'crawl_method': 'scrapy_optimized'
             }
         
-        # Đọc kết quả - tìm file mới nhất
+        # Parse result từ stdout thay vì file
         try:
-            # Tìm file scrapy_result_*.json mới nhất
-            import glob
-            result_files = glob.glob('scrapy_result_*.json')
-            if result_files:
-                # Lấy file mới nhất
-                result_file = max(result_files, key=os.path.getctime)
-                logger.info(f"🔍 Found result file: {result_file}")
+            stdout_text = stdout.decode('utf-8', errors='ignore')
+            logger.info(f"🔍 Scrapy stdout: {stdout_text[:200]}...")
+            
+            # Tìm result trong stdout
+            if "SPIDER_RESULT_START" in stdout_text and "SPIDER_RESULT_END" in stdout_text:
+                start_marker = stdout_text.find("SPIDER_RESULT_START") + len("SPIDER_RESULT_START")
+                end_marker = stdout_text.find("SPIDER_RESULT_END")
+                json_text = stdout_text[start_marker:end_marker].strip()
+                
+                result = json.loads(json_text)
+                logger.info(f"🔍 Successfully parsed in-memory result type: {type(result)}")
+                logger.info(f"🔍 Parsed result keys: {list(result.keys()) if isinstance(result, dict) else 'not dict'}")
+                return result
             else:
-                raise FileNotFoundError("No result files found")
-            
-            # Read JSON with retry to handle file writing race conditions
-            result = read_json_with_retry(result_file)
-            logger.info(f"🔍 Successfully parsed JSON result type: {type(result)}")
-            logger.info(f"🔍 Parsed JSON result keys: {list(result.keys()) if isinstance(result, dict) else 'not dict'}")
-            
-            # Cleanup result file
-            try:
-                os.remove(result_file)
-            except:
-                pass
-            return result
-        except FileNotFoundError:
+                raise ValueError("No result markers found in stdout")
+        except (FileNotFoundError, ValueError, json.JSONDecodeError) as e:
+            logger.error(f"Error parsing Scrapy result: {e}")
             return {
                 'success': False,
-                'error_message': 'No result file found',
+                'error_message': f'Error parsing Scrapy result: {str(e)}',
                 'crawl_time': crawl_time,
                 'crawl_method': 'scrapy_optimized'
             }
