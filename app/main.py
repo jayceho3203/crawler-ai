@@ -101,9 +101,7 @@ async def memory_monitoring_middleware(request: Request, call_next):
 # Include router with prefix
 app.include_router(router, prefix="/api/v1")
 
-# Add alias endpoint at root level to avoid 404
-from .api.routes import detect_career_pages_scrapy_alias
-app.add_api_route("/detect_career_pages_scrapy", detect_career_pages_scrapy_alias, methods=["POST"])
+# No alias endpoint needed - all endpoints use /api/v1 prefix
 
 # Health check endpoint with memory info
 @app.get("/health")
@@ -132,7 +130,10 @@ async def root():
             "health": "/health",
             "docs": "/docs",
             "career_pages": "/api/v1/detect_career_pages_scrapy",
-            "contact_info": "/api/v1/extract_contact_info"
+            "contact_info": "/api/v1/extract_contact_info",
+            "job_urls": "/api/v1/extract_job_urls",
+            "job_details": "/api/v1/extract_job_details",
+            "ai_analysis": "/api/v1/ai_agent_analysis"
         }
     }
 
