@@ -1,6 +1,7 @@
 # app/main.py
 """
 Main FastAPI application with memory optimization for Render free tier
+Requests-only mode (no Playwright) for compatibility
 """
 
 import os
@@ -35,7 +36,7 @@ def log_memory_usage():
 async def lifespan(app: FastAPI):
     """Application lifespan manager with memory optimization"""
     # Startup
-    logger.info("🚀 Starting crawler-ai service...")
+    logger.info("🚀 Starting crawler-ai service (requests-only mode)...")
     log_memory_usage()
     
     yield
@@ -49,7 +50,7 @@ async def lifespan(app: FastAPI):
 # Create FastAPI app with memory optimization
 app = FastAPI(
     title="Crawler AI Service",
-    description="AI-powered web crawler for career pages and contact information",
+    description="AI-powered web crawler for career pages and contact information (requests-only mode)",
     version="1.0.0",
     lifespan=lifespan,
     # Memory optimization settings
@@ -108,6 +109,7 @@ async def health_check():
     
     return {
         "status": "healthy",
+        "mode": "requests-only",
         "memory_usage_mb": round(memory_mb, 1),
         "memory_limit_mb": 512,  # Render free tier limit
         "memory_percentage": round((memory_mb / 512) * 100, 1)
@@ -120,6 +122,7 @@ async def root():
     return {
         "service": "Crawler AI Service",
         "version": "1.0.0",
+        "mode": "requests-only",
         "status": "running",
         "endpoints": {
             "health": "/health",
