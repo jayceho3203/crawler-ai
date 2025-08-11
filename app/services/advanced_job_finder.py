@@ -13,7 +13,7 @@ from urllib.parse import urljoin, urlparse
 from bs4 import BeautifulSoup
 
 from .crawler import crawl_single_url
-from .hidden_job_extractor import HiddenJobExtractor
+from .job_extraction_service import JobExtractionService
 from .job_analyzer import JobAnalyzer
 
 logger = logging.getLogger(__name__)
@@ -22,7 +22,7 @@ class AdvancedJobFinder:
     """Advanced service for finding jobs in career pages"""
     
     def __init__(self):
-        self.hidden_job_extractor = HiddenJobExtractor()
+        self.job_extractor = JobExtractionService()
         self.job_analyzer = JobAnalyzer()
         
         # Job detection patterns

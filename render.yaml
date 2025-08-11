@@ -6,8 +6,7 @@ services:
     buildCommand: |
       pip install --upgrade pip
       pip install --no-cache-dir -r requirements.txt
-      # Skip Playwright completely - use requests-only mode
-    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1 --loop asyncio --no-access-log --log-level warning
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: PYTHONUNBUFFERED
         value: "1"
@@ -17,8 +16,6 @@ services:
         value: "production"
       - key: PYTHONPATH
         value: "/opt/render/project/src"
-      - key: DISABLE_PLAYWRIGHT
-        value: "1"
       - key: USE_PLAYWRIGHT
         value: "0"
     healthCheckPath: /health

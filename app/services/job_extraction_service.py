@@ -16,10 +16,8 @@ import aiohttp
 # Conditional import based on environment variable
 USE_PLAYWRIGHT = os.getenv("USE_PLAYWRIGHT", "0").lower() in ("1", "true", "yes")
 
-if USE_PLAYWRIGHT:
-    from .hidden_job_extractor import HiddenJobExtractor  # Requires playwright
-else:
-    from .hidden_job_extractor_requests import HiddenJobExtractor  # Requests-only
+# Always use requests-only extractor for Render compatibility
+from .hidden_job_extractor_requests import HiddenJobExtractor
 
 from .job_analyzer import JobAnalyzer
 from .simple_job_formatter import SimpleJobFormatter
