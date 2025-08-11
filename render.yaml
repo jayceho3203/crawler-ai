@@ -6,7 +6,8 @@ services:
     buildCommand: |
       pip install --upgrade pip
       pip install --no-cache-dir -r requirements.txt
-      playwright install chromium --with-deps
+      # Skip Playwright browser install - use pre-built
+      playwright install-deps chromium
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1 --loop asyncio --access-log false --log-level warning
     envVars:
       - key: PLAYWRIGHT_BROWSERS_PATH
@@ -19,5 +20,7 @@ services:
         value: "production"
       - key: PYTHONPATH
         value: "/opt/render/project/src"
+      - key: PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD
+        value: "1"
     healthCheckPath: /health
     autoDeploy: true 
