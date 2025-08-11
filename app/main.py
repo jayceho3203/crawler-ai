@@ -53,9 +53,9 @@ app = FastAPI(
     description="AI-powered web crawler for career pages and contact information (requests-only mode)",
     version="1.0.0",
     lifespan=lifespan,
-    # Memory optimization settings
-    docs_url="/docs" if os.getenv("ENVIRONMENT") != "production" else None,
-    redoc_url="/redoc" if os.getenv("ENVIRONMENT") != "production" else None,
+    # Enable Swagger UI for testing (even in production)
+    docs_url="/docs",
+    redoc_url="/redoc",
 )
 
 # Add CORS middleware
