@@ -153,21 +153,19 @@ class ContactExtractorService:
             
         except Exception as e:
             logger.error(f"Error in contact extraction: {e}")
-            # Return basic data even if processing fails
-            basic_data = self._extract_basic_contact_data(result) if 'result' in locals() else {
-                'emails': [], 'phones': [], 'contact_forms': []
-            }
+            # Giữ kết quả đã có (phones đã tìm được) khi fallback
+            safe = locals().get("contact_data") or {"emails": [], "phones": [], "social_links": [], "contact_forms": []}
             return {
-                'success': True,  # Still return success with basic data
+                'success': True,  # Vẫn success vì đã có data
                 'error_message': str(e),
                 'requested_url': url,
                 'crawl_time': (datetime.now() - start_time).total_seconds(),
-                'crawl_method': result.get('crawl_method') if 'result' in locals() else 'requests',
-                'emails': basic_data.get('emails', []),
-                'phones': basic_data.get('phones', []),
-                'social_links': basic_data.get('social_links', []),
-                'contact_forms': basic_data.get('contact_forms', []),
-                'raw_extracted_data': basic_data,
+                'crawl_method': (result.get('crawl_method') if 'result' in locals() else 'requests'),
+                'emails': list(dict.fromkeys(safe.get('emails', []))),
+                'phones': list(dict.fromkeys(safe.get('phones', []))),   # ✅ giữ số
+                'social_links': list(dict.fromkeys(safe.get('social_links', []))),
+                'contact_forms': safe.get('contact_forms', []),
+                'raw_extracted_data': safe,
                 'total_pages_crawled': 1,
                 'total_links_found': len(result.get('urls', [])) if 'result' in locals() else 0
             }
@@ -259,17 +257,12 @@ class ContactExtractorService:
 
     def _merge_contact_data_with_priority(self, priority_data: Dict, fallback_data: Dict) -> Dict:
         """Merge contact data with priority (footer data takes precedence)"""
-        merged = {}
-        
-        for key in ['emails', 'phones', 'social_links', 'contact_forms']:
-            priority_items = priority_data.get(key, [])
-            fallback_items = fallback_data.get(key, [])
-            
-            # Priority data comes first, then fallback (avoid duplicates)
-            combined = priority_items + [item for item in fallback_items if item not in priority_items]
-            merged[key] = combined
-        
-        return merged
+        out = {k: list(dict.fromkeys(fallback_data.get(k, []))) for k in ("emails","phones","social_links","contact_forms")}
+        for k in ("emails","phones","social_links","contact_forms"):
+            for v in priority_data.get(k, []):     # primary (footer/home) ưu tiên
+                if v not in out[k]:
+                    out[k].insert(0, v)      # đẩy lên đầu
+        return out
     
     def _extract_basic_contact_data(self, result: Dict) -> Dict:
         """Extract basic contact data from crawl result"""
@@ -426,21 +419,20 @@ class ContactExtractorService:
         try:
             result = await crawl_single_url(url)
             if result['success']:
-                return await self._extract_basic_contact_data(result)
+                return self._extract_basic_contact_data(result)  # Bỏ await vì đã là sync
             return {'success': False}
         except Exception as e:
             logger.error(f"Error crawling contact page {url}: {e}")
             return {'success': False}
     
-    def _merge_contact_data(self, data1: Dict, data2: Dict) -> Dict:
+    def _merge_contact_data(self, a: Dict, b: Dict) -> Dict:
         """Merge two contact data dictionaries"""
-        merged = {}
-        for key in data1.keys():
-            if key in data2:
-                merged[key] = list(set(data1[key] + data2[key]))
-            else:
-                merged[key] = data1[key]
-        return merged
+        out = {}
+        for k in ("emails","phones","social_links","contact_forms"):
+            la, lb = a.get(k, []), b.get(k, [])
+            # nếu lb rỗng thì giữ la, tránh overwrite
+            out[k] = list(dict.fromkeys((la or []) + (lb or [])))
+        return out
     
     def _prepare_data_for_classifier(self, contact_data: Dict) -> List[Dict]:
         """Prepare data for the contact classifier"""
