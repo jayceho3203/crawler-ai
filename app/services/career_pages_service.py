@@ -42,13 +42,13 @@ class CareerPagesService:
         try:
             logger.info(f"🔍 Starting career page detection for: {url}")
             
-            # Use Scrapy if enabled (default)
+            # Temporarily disable Scrapy due to project settings issues
             if use_scrapy:
-                logger.info("🚀 Using optimized Scrapy spider")
-                return await self._detect_career_pages_scrapy(url, max_pages_to_scan)
+                logger.info("⚠️ Scrapy temporarily disabled, using requests fallback")
+                use_scrapy = False
             
-            # Fallback to original method
-            logger.info("🔄 Using original crawling method")
+            # Use requests-based method
+            logger.info("🔄 Using requests-based crawling method")
             
             # Step 1: Crawl the main page
             result = await crawl_single_url(url)
