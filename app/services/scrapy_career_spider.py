@@ -707,17 +707,19 @@ print("Scrapy completed successfully")
         
         # Kiểm tra kết quả
         if process.returncode != 0:
-            logger.error(f"Scrapy subprocess failed: {stderr.decode()}")
+            from ..utils.text import to_text
+            stderr_text = to_text(stderr)
+            logger.error(f"Scrapy subprocess failed: {stderr_text}")
             return {
                 'success': False,
-                'error_message': f'Scrapy subprocess failed: {stderr.decode()}',
+                'error_message': f'Scrapy subprocess failed: {stderr_text}',
                 'crawl_time': crawl_time,
                 'crawl_method': 'scrapy_optimized'
             }
         
         # Parse result từ stdout thay vì file
         try:
-            stdout_text = stdout.decode('utf-8', errors='ignore')
+            stdout_text = to_text(stdout)
             logger.info(f"🔍 Scrapy stdout: {stdout_text[:200]}...")
             
             # Tìm result trong stdout

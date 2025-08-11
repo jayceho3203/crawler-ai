@@ -182,7 +182,7 @@ class ContactExtractorService:
         # Check URLs for social media
         for url in urls:
             try:
-                url_str = to_text(url)  # Convert URL objects to string
+                url_str = normalize_url_util(url)  # Convert URL objects to string and normalize
                 for platform in self.social_patterns.keys():
                     if platform in url_str.lower():
                         social_links.append(url_str)
@@ -221,7 +221,7 @@ class ContactExtractorService:
         
         for url in urls:
             try:
-                url_str = to_text(url)  # Convert URL objects to string
+                url_str = normalize_url_util(url)  # Convert URL objects to string and normalize
                 url_lower = url_str.lower()
                 if any(keyword in url_lower for keyword in contact_keywords):
                     contact_forms.append(url_str)
@@ -246,9 +246,14 @@ class ContactExtractorService:
         # Filter URLs that might contain contact info
         contact_urls = []
         for url in urls_to_crawl:
-            url_lower = url.lower()
-            if any(keyword in url_lower for keyword in ['contact', 'about', 'lien-he', 'gioi-thieu']):
-                contact_urls.append(url)
+            try:
+                url_str = normalize_url_util(url)  # Normalize URL and remove fragments
+                url_lower = url_str.lower()
+                if any(keyword in url_lower for keyword in ['contact', 'about', 'lien-he', 'gioi-thieu']):
+                    contact_urls.append(url_str)
+            except Exception as e:
+                logger.warning(f"Error normalizing URL {url}: {e}")
+                continue
         
         # Limit to prevent too many requests
         contact_urls = contact_urls[:5]

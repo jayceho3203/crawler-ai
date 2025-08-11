@@ -98,8 +98,12 @@ async def memory_monitoring_middleware(request: Request, call_next):
             gc.collect()
             log_memory_usage()
 
-# Include router
+# Include router with prefix
 app.include_router(router, prefix="/api/v1")
+
+# Add alias endpoint at root level to avoid 404
+from .api.routes import detect_career_pages_scrapy_alias
+app.add_api_route("/detect_career_pages_scrapy", detect_career_pages_scrapy_alias, methods=["POST"])
 
 # Health check endpoint with memory info
 @app.get("/health")

@@ -3,11 +3,8 @@
 Scrapy runner service using blocking subprocess to avoid race conditions
 """
 
-import os
 import json
-import uuid
 import subprocess
-import shlex
 import functools
 import asyncio
 import logging
@@ -15,137 +12,81 @@ from typing import Dict
 
 logger = logging.getLogger(__name__)
 
-# Create data directory for Scrapy results
-BASE_DIR = "/opt/render/project/src/.data/scrapy"
-os.makedirs(BASE_DIR, exist_ok=True)
-
 def _run_spider_blocking(start_url: str, max_pages: int = 50) -> dict:
     """Run Scrapy spider in blocking mode to avoid race conditions"""
     try:
-        # Generate unique output file
-        out_path = os.path.join(BASE_DIR, f"scrapy_result_{uuid.uuid4().hex}.json")
+        # Use direct Scrapy command with JSON output to stdout
+        cmd = [
+            "python", "-m", "scrapy", "crawl", "career_spider",
+            "-a", f"start_url={start_url}",
+            "-a", f"max_pages={max_pages}",
+            "-o", "-", "-t", "json",                 # ✅ Xuất JSON ra stdout
+            "-s", "LOG_LEVEL=ERROR",                 # log đi stderr
+            "-s", "FEED_EXPORT_ENCODING=utf-8",
+            "-s", "TELNETCONSOLE_ENABLED=False",
+            "-s", "MEMUSAGE_ENABLED=False",
+            "-s", "DOWNLOAD_TIMEOUT=30",
+            "-s", "CONCURRENT_REQUESTS=2",
+            "-s", "DOWNLOAD_DELAY=1",
+        ]
         
-        # Create temporary script for Scrapy
-        script_content = f'''
-import sys
-import os
-sys.path.append(os.getcwd())
-
-from scrapy.crawler import CrawlerProcess
-from scrapy.utils.project import get_project_settings
-from app.services.scrapy_career_spider import OptimizedCareerSpider
-
-# Configure settings
-settings = get_project_settings()
-settings.update({{
-    'LOG_LEVEL': 'ERROR',
-    'TELNETCONSOLE_ENABLED': False,
-    'LOGSTATS_INTERVAL': 60,
-    'MEMUSAGE_ENABLED': False,
-    'FEEDS': None,
-    'FEED_EXPORT_ENABLED': False,
-    'DOWNLOAD_TIMEOUT': 30,
-    'DOWNLOAD_MAXSIZE': 1024 * 1024,
-    'DOWNLOAD_WARNSIZE': 512 * 1024,
-    'CONCURRENT_REQUESTS': 2,
-    'CONCURRENT_REQUESTS_PER_DOMAIN': 1,
-    'DOWNLOAD_DELAY': 1,
-    'AUTOTHROTTLE_ENABLED': True,
-    'AUTOTHROTTLE_START_DELAY': 1,
-    'AUTOTHROTTLE_MAX_DELAY': 3,
-    'AUTOTHROTTLE_TARGET_CONCURRENCY': 1.0,
-    'COOKIES_ENABLED': False,
-    'DOWNLOADER_MIDDLEWARES': {{
-        'scrapy.downloadermiddlewares.useragent.UserAgentMiddleware': None,
-        'scrapy.downloadermiddlewares.retry.RetryMiddleware': None,
-        'scrapy.downloadermiddlewares.redirect.RedirectMiddleware': None,
-    }},
-    'SPIDER_MIDDLEWARES': {{
-        'scrapy.spidermiddlewares.httperror.HttpErrorMiddleware': None,
-        'scrapy.spidermiddlewares.offsite.OffsiteMiddleware': None,
-    }}
-}})
-
-# Custom spider to capture results
-class ResultCaptureSpider(OptimizedCareerSpider):
-    def closed(self, reason):
-        # Capture results when spider finishes
-        result = {{
-            'success': True,
-            'requested_url': '{start_url}',
-            'career_pages': self.career_pages,
-            'total_pages_crawled': self.crawled_pages,
-            'career_pages_found': self.found_career_pages,
-            'crawl_time': 0,
-            'crawl_method': 'scrapy_optimized',
-            'contact_info': {{
-                'emails': list(self.all_emails),
-                'phones': list(self.all_phones),
-                'contact_urls': list(self.all_contact_urls)
-            }}
-        }}
+        logger.info(f"🚀 Running Scrapy command: {' '.join(cmd)}")
         
-        # Write result to file
-        with open('{out_path}', 'w', encoding='utf-8') as f:
-            json.dump(result, f, ensure_ascii=False, indent=2)
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=150)
         
-        print(f"Result saved to: {{out_path}}")
-        super().closed(reason)
-
-# Run spider
-process = CrawlerProcess(settings)
-process.crawl(ResultCaptureSpider, start_url='{start_url}', max_pages={max_pages})
-process.start()
-print("Scrapy completed successfully")
-'''
+        if res.returncode != 0:
+            error_msg = res.stderr.strip() or res.stdout[:400] or "Unknown Scrapy error"
+            logger.error(f"❌ Scrapy failed with return code {res.returncode}: {error_msg}")
+            raise RuntimeError(f"Scrapy failed: {error_msg}")
         
-        # Save temporary script
-        script_file = f'scrapy_script_{uuid.uuid4().hex}.py'
-        with open(script_file, 'w', encoding='utf-8') as f:
-            f.write(script_content)
+        raw = res.stdout.strip()
+        logger.info(f"📊 Scrapy raw output length: {len(raw)}")
+        
+        # Nếu spider không yield item nào, Scrapy vẫn in "[]"
+        if not raw:
+            raw = "[]"
+            logger.warning("⚠️ Scrapy output empty, using empty array")
         
         try:
-            # Run script with timeout
-            result = subprocess.run(
-                ['python', script_file],
-                capture_output=True,
-                text=True,
-                timeout=120,  # 2 minutes timeout
-                cwd=os.getcwd()
-            )
+            items = json.loads(raw)
+            logger.info(f"✅ Successfully parsed Scrapy JSON output: {len(items) if isinstance(items, list) else 'dict'}")
             
-            if result.returncode != 0:
-                raise RuntimeError(f"Scrapy failed: {result.stderr}")
-            
-            # Wait a bit for file to be written
-            import time
-            time.sleep(1)
-            
-            # Read result file
-            if os.path.exists(out_path):
-                with open(out_path, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                
-                # Cleanup
-                try:
-                    os.remove(out_path)
-                except:
-                    pass
-                
-                return data
+            # Convert items to expected format
+            if isinstance(items, list):
+                # Items from spider
+                return {
+                    "success": True,
+                    "requested_url": start_url,
+                    "career_pages": items,
+                    "total_pages_crawled": len(items),
+                    "career_pages_found": len(items),
+                    "crawl_time": 0,
+                    "crawl_method": "scrapy_optimized",
+                    "contact_info": {
+                        "emails": [],  # Will be extracted from items
+                        "phones": [],
+                        "contact_urls": []
+                    }
+                }
             else:
-                raise FileNotFoundError(f"Result file not found: {out_path}")
+                # Direct result dict
+                return items
                 
-        finally:
-            # Cleanup script
-            try:
-                os.remove(script_file)
-            except:
-                pass
-                
+        except json.JSONDecodeError as e:
+            # Log 200 ký tự đầu để debug nếu JSON hỏng
+            snippet = raw[:200].replace("\n", "\\n")
+            error_msg = f"Invalid JSON from spider: {e}. Snippet: {snippet}"
+            logger.error(f"❌ {error_msg}")
+            raise RuntimeError(error_msg)
+            
+    except subprocess.TimeoutExpired:
+        error_msg = "Scrapy command timed out after 150 seconds"
+        logger.error(f"❌ {error_msg}")
+        raise RuntimeError(error_msg)
     except Exception as e:
-        logger.error(f"Error in blocking Scrapy runner: {e}")
-        raise
+        error_msg = f"Unexpected error in Scrapy runner: {e}"
+        logger.error(f"❌ {error_msg}")
+        raise RuntimeError(error_msg)
 
 async def run_spider(start_url: str, max_pages: int = 50) -> dict:
     """Run Scrapy spider asynchronously using executor"""

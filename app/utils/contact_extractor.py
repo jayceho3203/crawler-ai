@@ -16,15 +16,9 @@ except ImportError:
 # Import constants from the main constants file
 from .constants import CAREER_KEYWORDS_VI, CAREER_EXACT_PATTERNS, REJECTED_NON_CAREER_PATHS
 
-def to_text(v) -> str:
-    """Convert any value to text, handling URL objects and bytes"""
-    if isinstance(v, (bytes, bytearray)):
-        return v.decode("utf-8", errors="ignore")
-    if URL and isinstance(v, URL):
-        return str(v)
-    if isinstance(v, ParseResult):
-        return v.geturl()
-    return str(v)
+from .text import to_text, normalize_url as normalize_url_util
+
+# Remove duplicate to_text function - use the one from text.py
 
 # Social media domains
 SOCIAL_DOMAINS: Set[str] = {
