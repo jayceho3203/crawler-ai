@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 # Tối ưu timeout cho performance (một số site cần lâu hơn để vượt anti-bot)
 OPTIMIZED_TIMEOUT = 45000  # 45 seconds
-PAGE_WAIT_TIMEOUT = 300  # 300ms
+PAGE_WAIT_TIMEOUT = 100  # Reduced to 100ms for memory optimization
 
 async def extract_with_playwright(url: str) -> Dict:
     """Primary method using Playwright for JavaScript rendering and dynamic content"""
@@ -30,7 +30,7 @@ async def extract_with_playwright(url: str) -> Dict:
     
     try:
         async with async_playwright() as p:
-            # Launch browser with optimized settings for speed
+            # Launch browser with memory-optimized settings for Render free tier
             browser = await p.chromium.launch(
                 headless=True,
                 args=[
@@ -51,17 +51,40 @@ async def extract_with_playwright(url: str) -> Dict:
                     '--disable-plugins',
                     '--disable-images',
                     '--disable-web-security',
+                    '--disable-features=VizDisplayCompositor',
+                    # Memory optimization flags
+                    '--memory-pressure-off',
+                    '--max_old_space_size=128',
+                    '--single-process',
+                    '--disable-background-networking',
+                    '--disable-sync',
+                    '--disable-translate',
+                    '--disable-background-timer-throttling',
+                    '--disable-backgrounding-occluded-windows',
+                    '--disable-renderer-backgrounding',
+                    '--disable-features=TranslateUI',
+                    '--disable-ipc-flooding-protection',
                     '--disable-features=VizDisplayCompositor'
                 ]
             )
             
-            # Create context with optimized settings + basic stealth
+            # Create context with memory-optimized settings + basic stealth
             context = await browser.new_context(
-                viewport={'width': 1280, 'height': 720},
+                viewport={'width': 800, 'height': 600},  # Reduced viewport
                 user_agent=DEFAULT_USER_AGENT,
                 extra_http_headers=DEFAULT_HEADERS,
-                ignore_https_errors=True  # Ignore SSL certificate errors
+                ignore_https_errors=True,  # Ignore SSL certificate errors
+                # Memory optimization
+                java_script_enabled=True,
+                bypass_csp=True,
+                # Reduce memory usage
+                device_scale_factor=1,
+                is_mobile=False,
+                has_touch=False,
+                locale='en-US',
+                timezone_id='America/New_York'
             )
+            
             # Basic stealth to reduce headless detection
             await context.add_init_script(
                 """
@@ -78,8 +101,14 @@ async def extract_with_playwright(url: str) -> Dict:
             
             page = await context.new_page()
             
-            # Block only heavy media resources (keep JS/CSS to avoid anti-bot issues)
-            await page.route("**/*.{png,jpg,jpeg,gif,svg,webp,ico,woff,woff2,ttf}", lambda route: route.abort())
+            # Block heavy resources to save memory
+            await page.route("**/*.{png,jpg,jpeg,gif,svg,webp,ico,woff,woff2,ttf,mp4,webm,avi,mov}", lambda route: route.abort())
+            # Block unnecessary JS/CSS to reduce memory
+            await page.route("**/*.{css,js}", lambda route: route.abort())
+            # Block analytics and tracking
+            await page.route("**/*google-analytics*", lambda route: route.abort())
+            await page.route("**/*facebook*", lambda route: route.abort())
+            await page.route("**/*doubleclick*", lambda route: route.abort())
             
             # Navigate to URL with optimized timeout
             logger.info(f"🌐 Playwright navigating to: {url}")
@@ -92,7 +121,7 @@ async def extract_with_playwright(url: str) -> Dict:
             if not response or response.status >= 400:
                 raise Exception(f"HTTP {response.status if response else 'Unknown'}")
             
-            # Small wait to let dynamic content settle
+            # Minimal wait to let essential content load
             await page.wait_for_timeout(PAGE_WAIT_TIMEOUT)
             
             # Extract HTML content
@@ -101,7 +130,7 @@ async def extract_with_playwright(url: str) -> Dict:
             # Extract emails using enhanced patterns
             email_patterns = [
                 r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b',
-                r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
+                r'[a-zA-Z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}'
             ]
             
             all_emails = []
@@ -136,11 +165,11 @@ async def extract_with_playwright(url: str) -> Dict:
                 found_phones = re.findall(pattern, html_content)
                 phones.extend(found_phones)
             
-            # Extract all URLs (tối ưu - chỉ lấy 100 URLs đầu)
+            # Extract all URLs (tối ưu - chỉ lấy 50 URLs đầu để giảm memory)
             urls = []
             try:
                 links = await page.query_selector_all('a[href]')
-                for i, link in enumerate(links[:100]):  # Giới hạn 100 links
+                for i, link in enumerate(links[:50]):  # Reduced from 100 to 50
                     href = await link.get_attribute('href')
                     if href:
                         full_url = urljoin(url, href)
@@ -148,22 +177,24 @@ async def extract_with_playwright(url: str) -> Dict:
             except:
                 # Fallback to BeautifulSoup if Playwright selector fails
                 soup = BeautifulSoup(html_content, 'html.parser')
-                for a_tag in soup.find_all('a', href=True)[:100]:  # Giới hạn 100 links
+                for a_tag in soup.find_all('a', href=True)[:50]:  # Reduced from 100 to 50
                     href = a_tag.get('href')
                     if href:
                         full_url = urljoin(url, href)
                         urls.append(full_url)
-            
-            await browser.close()
             
             crawl_time = time.time() - start_time
             logger.info(f"✅ Playwright crawl completed: {url} - {crawl_time:.2f}s")
             logger.info(f"📊 Emails found: {len(valid_emails)}")
             logger.info(f"📊 URLs found: {len(urls)}")
             
-            # Close browser to free memory
+            # Immediately close browser to free memory
             await context.close()
             await browser.close()
+            
+            # Force garbage collection
+            import gc
+            gc.collect()
             
             return {
                 "success": True,
@@ -181,7 +212,7 @@ async def extract_with_playwright(url: str) -> Dict:
         crawl_time = time.time() - start_time
         logger.error(f"❌ Playwright failed for {url}: {str(e)}")
         
-        # Ensure browser is closed even on error
+        # Ensure browser is closed even on error to prevent memory leaks
         try:
             if 'context' in locals():
                 await context.close()
@@ -189,6 +220,10 @@ async def extract_with_playwright(url: str) -> Dict:
                 await browser.close()
         except:
             pass
+        
+        # Force garbage collection on error
+        import gc
+        gc.collect()
             
         return {
             "success": False,
@@ -228,7 +263,7 @@ async def extract_with_requests(url: str) -> Dict:
                 # Extract emails using enhanced patterns
                 email_patterns = [
                     r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b',
-                    r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
+                    r'[a-zA-Z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}'
                 ]
                 
                 all_emails = []

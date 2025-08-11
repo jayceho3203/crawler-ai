@@ -1,42 +1,59 @@
 # app/services/scrapy_career_spider.py
 """
 Optimized Scrapy Spider for career page detection
-Tối ưu keywords và performance
+Memory-optimized for Render free tier
 """
 
 import scrapy
 import json
-import time
-from urllib.parse import urljoin, urlparse
-from typing import List, Dict
 import logging
+from datetime import datetime
+from typing import Dict, List
+from scrapy.crawler import CrawlerProcess
+from scrapy.utils.project import get_project_settings
+from scrapy.settings import Settings
 
 logger = logging.getLogger(__name__)
 
 class OptimizedCareerSpider(scrapy.Spider):
     """
-    Optimized Scrapy Spider với keywords tối ưu
+    Optimized Scrapy Spider với keywords tối ưu và memory optimization
     """
+
     name = 'optimized_career_spider'
     
-    # Cấu hình tối ưu cho speed
+    # Memory optimization: reduce concurrent requests
     custom_settings = {
-        'CONCURRENT_REQUESTS': 16,       # Tăng lên 16 trang cùng lúc
-        'CONCURRENT_REQUESTS_PER_DOMAIN': 16,
-        'DOWNLOAD_DELAY': 0.1,           # Giảm delay xuống 0.1s
-        'ROBOTSTXT_OBEY': False,         # Tắt robots.txt để crawl nhanh hơn
-        'COOKIES_ENABLED': False,        # Tắt cookies để tăng tốc
-        'DOWNLOAD_TIMEOUT': 5,           # Giảm timeout xuống 5s
-        'RETRY_TIMES': 0,                # Tắt retry để tăng tốc
-        'RETRY_HTTP_CODES': [500, 502, 503, 504, 408, 429],
-        'USER_AGENT': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        # Tắt extensions không cần thiết để log sạch hơn
-        'TELNETCONSOLE_ENABLED': False,  # Tắt Telnet để tránh lỗi ConnectionDone
-        'LOGSTATS_INTERVAL': 60,         # Giảm log stats frequency
-        'MEMUSAGE_ENABLED': False,       # Tắt memory usage tracking
-        'AUTOTHROTTLE_ENABLED': False,   # Tắt auto throttle để tăng tốc
-        'AUTOTHROTTLE_START_DELAY': 0.1, # Delay 0.1s
-        'AUTOTHROTTLE_MAX_DELAY': 1      # Max delay 1s
+        'CONCURRENT_REQUESTS': 2,  # Reduced from default 16
+        'CONCURRENT_REQUESTS_PER_DOMAIN': 1,  # Only 1 request per domain
+        'DOWNLOAD_DELAY': 1,  # 1 second delay between requests
+        'RANDOMIZE_DOWNLOAD_DELAY': True,
+        'AUTOTHROTTLE_ENABLED': True,
+        'AUTOTHROTTLE_START_DELAY': 1,
+        'AUTOTHROTTLE_MAX_DELAY': 3,
+        'AUTOTHROTTLE_TARGET_CONCURRENCY': 1.0,
+        'AUTOTHROTTLE_DEBUG': False,
+        # Memory optimization
+        'DOWNLOAD_TIMEOUT': 30,
+        'DOWNLOAD_MAXSIZE': 1024 * 1024,  # 1MB max page size
+        'DOWNLOAD_WARNSIZE': 512 * 1024,  # 512KB warning size
+        'LOG_LEVEL': 'WARNING',  # Reduce logging overhead
+        'COOKIES_ENABLED': False,  # Disable cookies to save memory
+        'TELNETCONSOLE_ENABLED': False,
+        'DOWNLOAD_HANDLERS': {
+            'http': 'scrapy.core.downloader.handlers.http.HTTPDownloadHandler',
+            'https': 'scrapy.core.downloader.handlers.http.HTTPSDownloadHandler',
+        },
+        # Disable unnecessary middleware
+        'DOWNLOADER_MIDDLEWARES': {
+            'scrapy.downloadermiddlewares.useragent.UserAgentMiddleware': None,
+            'scrapy.downloadermiddlewares.retry.RetryMiddleware': None,
+            'scrapy.downloadermiddlewares.redirect.RedirectMiddleware': None,
+        },
+        'SPIDER_MIDDLEWARES': {
+            'scrapy.spidermiddlewares.httperror.HttpErrorMiddleware': None,
+            'scrapy.spidermiddlewares.offsite.OffsiteMiddleware': None,
+        }
     }
     
     def __init__(self, start_url: str = None, max_pages: int = 50, *args, **kwargs):
@@ -47,7 +64,7 @@ class OptimizedCareerSpider(scrapy.Spider):
         self.crawled_pages = 0
         self.found_career_pages = 0
         self.domain = None
-        self.start_time = time.time()
+        self.start_time = datetime.now()
         
         # Contact extraction data
         self.all_emails = set()
@@ -481,13 +498,13 @@ class OptimizedCareerSpider(scrapy.Spider):
             'career_pages': career_pages_data,
             'total_pages_crawled': self.crawled_pages,
             'career_pages_found': len(career_pages_data),
-            'crawl_time': time.time() - self.start_time,
+            'crawl_time': datetime.now() - self.start_time,
             'crawl_method': 'scrapy_optimized',
             'contact_info': contact_info  # Include contact info
         }
         
         # Ghi result vào file
-        timestamp = int(time.time())
+        timestamp = int(datetime.now().timestamp())
         result_file = f'scrapy_result_{timestamp}.json'
         
         try:
