@@ -110,15 +110,24 @@ class CareerPagesService:
             if strict_filtering:
                 filtered_career_pages = []
                 for page in career_pages:
-                    validation = filter_career_urls([page])
-                    if validation and validation[0]['is_accepted']:
+                    # Check if this page has high confidence in analysis
+                    page_analysis = next((a for a in career_page_analysis if a['url'] == page), None)
+                    
+                    if page_analysis and page_analysis.get('confidence', 0) >= 0.8:
+                        # High confidence career pages should always pass strict validation
                         filtered_career_pages.append(page)
+                        logger.info(f"✅ High confidence career page passed strict validation: {page} (score: {page_analysis['confidence']})")
                     else:
-                        potential_career_pages.append(page)
-                        rejected_urls.append({
-                            'url': page,
-                            'reason': 'Failed strict validation'
-                        })
+                        # Apply strict validation only for lower confidence pages
+                        validation = filter_career_urls([page])
+                        if validation and validation[0]['is_accepted']:
+                            filtered_career_pages.append(page)
+                        else:
+                            potential_career_pages.append(page)
+                            rejected_urls.append({
+                                'url': page,
+                                'reason': 'Failed strict validation'
+                            })
                 career_pages = filtered_career_pages
             
             # Step 9: Calculate confidence score
@@ -189,12 +198,12 @@ class CareerPagesService:
                     career_indicators.append(f"Path contains '{keyword}'")
                     analysis['confidence'] += 0.1  # Giảm từ 0.2 xuống 0.1
             
-            # 3. Career patterns (HIGH WEIGHT)
+            # 3. Career patterns (HIGH WEIGHT) - EASIER TO REACH 0.8
             career_patterns = ['/career', '/careers', '/jobs', '/employment', '/tuyen-dung', '/viec-lam']
             for pattern in career_patterns:
                 if pattern in path:
                     career_indicators.append(f"Career pattern: {pattern}")
-                    analysis['confidence'] += 0.8  # Tăng từ 0.4 lên 0.8
+                    analysis['confidence'] += 0.9  # Tăng từ 0.8 lên 0.9
             
             # 4. Domain keywords (LOW WEIGHT)
             for keyword in self.career_keywords:
@@ -208,11 +217,11 @@ class CareerPagesService:
                     career_indicators.append(f"Job board domain: {job_board}")
                     analysis['confidence'] += 0.5
             
-            # 6. Path depth
+            # 6. Path depth - BONUS FOR SHALLOW PATHS
             path_depth = len([p for p in path.split('/') if p])
             if path_depth <= 2:
                 career_indicators.append("Shallow path depth")
-                analysis['confidence'] += 0.1
+                analysis['confidence'] += 0.2  # Tăng từ 0.1 lên 0.2
             elif path_depth > 4:
                 analysis['rejection_reason'] = 'Path too deep'
                 return analysis
