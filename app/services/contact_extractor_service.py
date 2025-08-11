@@ -72,8 +72,16 @@ class ContactExtractorService:
                     'crawl_time': (datetime.now() - start_time).total_seconds()
                 }
             
-            # Step 2: Extract basic contact data
+            # Step 2: Extract basic contact data (prioritize footer)
             contact_data = await self._extract_basic_contact_data(result)
+            
+            # Step 2.5: PRIORITIZE FOOTER CONTACT INFO
+            logger.info(f"🔍 Prioritizing footer contact extraction...")
+            footer_contact_data = await self._extract_footer_contact_info(result, url)
+            if footer_contact_data:
+                logger.info(f"✅ Found footer contact info: {footer_contact_data}")
+                # Merge footer data with priority
+                contact_data = self._merge_contact_data_with_priority(footer_contact_data, contact_data)
             
             # Step 3: Enhanced social media detection
             if include_social:
@@ -141,6 +149,100 @@ class ContactExtractorService:
                 'total_pages_crawled': 1,
                 'total_links_found': len(result.get('urls', [])) if 'result' in locals() else 0
             }
+
+    async def _extract_footer_contact_info(self, result: Dict, base_url: str) -> Dict:
+        """Extract contact information from footer section with priority"""
+        footer_data = {
+            'emails': [],
+            'phones': [],
+            'social_links': [],
+            'contact_forms': []
+        }
+        
+        try:
+            html_content = result.get('html', '')
+            
+            # Look for footer section (common footer selectors)
+            footer_selectors = [
+                'footer',
+                '.footer',
+                '#footer',
+                '.site-footer',
+                '.main-footer',
+                '.bottom-footer'
+            ]
+            
+            # Extract phone numbers from footer (priority) - Always try to extract phones
+            footer_phones = await self._extract_phone_numbers_from_footer(html_content)
+            footer_data['phones'].extend(footer_phones)
+            logger.info(f"📞 Footer phones found: {footer_phones}")
+            
+            # Extract emails from footer (priority) - Always try to extract emails
+            footer_emails = await self._extract_emails_from_footer(html_content)
+            footer_data['emails'].extend(footer_emails)
+            logger.info(f"📧 Footer emails found: {footer_emails}")
+            
+            return footer_data
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Footer contact extraction failed: {e}")
+            return footer_data
+
+    async def _extract_phone_numbers_from_footer(self, html_content: str) -> List[str]:
+        """Extract phone numbers specifically from footer content"""
+        phones = []
+        
+        # Vietnamese phone patterns (footer specific)
+        footer_phone_patterns = [
+            r'(\+84|84|0)[\s\-]?[0-9]{1,4}[\s\-]?[0-9]{1,4}[\s\-]?[0-9]{1,4}',  # +84-xxx-xxx-xxx
+            r'(\+84|84|0)[0-9]{9,10}',  # +84xxxxxxxxx
+            r'0[0-9]{9,10}',            # 0xxxxxxxxx
+            r'[0-9]{7,15}',             # Generic fallback
+        ]
+        
+        for pattern in footer_phone_patterns:
+            matches = re.findall(pattern, html_content, re.IGNORECASE)
+            if isinstance(matches, list):
+                phones.extend(matches)
+            else:
+                phones.append(matches)
+        
+        # Clean and validate
+        cleaned_phones = []
+        for phone in phones:
+            if not phone:
+                continue
+            phone_str = str(phone).strip()
+            cleaned = re.sub(r'[\s\-\(\)\.]', '', phone_str)
+            if len(cleaned) >= 7 and len(cleaned) <= 15:
+                cleaned_phones.append(cleaned)
+        
+        return list(set(cleaned_phones))
+
+    async def _extract_emails_from_footer(self, html_content: str) -> List[str]:
+        """Extract emails specifically from footer content"""
+        emails = []
+        
+        # Email pattern
+        email_pattern = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
+        matches = re.findall(email_pattern, html_content, re.IGNORECASE)
+        emails.extend(matches)
+        
+        return list(set(emails))
+
+    def _merge_contact_data_with_priority(self, priority_data: Dict, fallback_data: Dict) -> Dict:
+        """Merge contact data with priority (footer data takes precedence)"""
+        merged = {}
+        
+        for key in ['emails', 'phones', 'social_links', 'contact_forms']:
+            priority_items = priority_data.get(key, [])
+            fallback_items = fallback_data.get(key, [])
+            
+            # Priority data comes first, then fallback (avoid duplicates)
+            combined = priority_items + [item for item in fallback_items if item not in priority_items]
+            merged[key] = combined
+        
+        return merged
     
     async def _extract_basic_contact_data(self, result: Dict) -> Dict:
         """Extract basic contact data from crawl result"""
