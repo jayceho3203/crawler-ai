@@ -62,9 +62,9 @@ async def detect_career_pages_scrapy_main(request: CareerPagesRequest):
         logger.info(f"🎯 Processing contact info from Scrapy spider")
         
         # Check if Scrapy result contains contact info
-        if result.get('success') and result.get('contact_info'):
+        if result and result.get('success') and result.get('contact_info'):
             logger.info(f"✅ Using contact info from Scrapy spider")
-            scrapy_contact = result['contact_info']
+            scrapy_contact = result.get('contact_info', {})
             
             # Convert to format expected by contact extractor
             extracted_data = []
@@ -124,13 +124,14 @@ async def detect_career_pages_scrapy_main(request: CareerPagesRequest):
                 contact_info = None
 
                     # Step 2: Only crawl contact info if we found career pages
-            if result.get('success') and result.get('career_pages') and len(result['career_pages']) > 0:
-                logger.info(f"✅ Found {len(result['career_pages'])} career pages → extracting contact info")
+            if result and result.get('success') and result.get('career_pages') and len(result.get('career_pages', [])) > 0:
+                career_pages = result.get('career_pages', [])
+                logger.info(f"✅ Found {len(career_pages)} career pages → extracting contact info")
                 
                 # Extract contact info from homepage + career pages
                 unique_targets = [request.url]  # homepage trước
                 # cộng thêm tối đa 2 trang career cho chắc
-                unique_targets += result['career_pages'][:2]
+                unique_targets += career_pages[:2]
                 seen = set()
                 merged = {"emails": [], "phones": [], "social_links": [], "contact_forms": []}
 
@@ -167,7 +168,8 @@ async def detect_career_pages_scrapy_main(request: CareerPagesRequest):
         return CareerPagesResponse(**response_data)
         
     except Exception as e:
-        logger.error(f"Error in Scrapy career page detection endpoint: {e}")
+        import traceback
+        logger.exception("Error in Scrapy career page detection endpoint")  # tự động in traceback
         return CareerPagesResponse(
             requested_url=request.url,
             success=False,
@@ -304,3 +306,10 @@ async def ai_agent_analysis(request: AIAgentRequest):
 async def health_check():
     """Health check endpoint"""
     return {"status": "healthy", "timestamp": datetime.now().isoformat()}
+
+@router.post("/clear-cache")
+async def clear_cache():
+    """Clear all cached results"""
+    from ..services.cache import clear_cache
+    cleared_count = clear_cache()
+    return {"success": True, "cleared_items": cleared_count, "message": f"Cleared {cleared_count} cached items"}

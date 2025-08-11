@@ -76,7 +76,7 @@ class ContactExtractorService:
             # Step 1: Crawl the main page
             result = await crawl_single_url(url)
             
-            if not result['success']:
+            if not result or not result.get('success'):
                 return {
                     'success': False,
                     'error_message': 'Failed to crawl the website',
@@ -101,7 +101,7 @@ class ContactExtractorService:
             except Exception as e:
                 logger.warning(f"⚠️ Footer extraction failed: {e}")
                 # Fallback to old method
-                footer_contact_data = await self._extract_footer_contact_info(result, url)
+                footer_contact_data = self._extract_footer_contact_info(result, url)
                 if footer_contact_data:
                     contact_data = self._merge_contact_data_with_priority(footer_contact_data, contact_data)
             
@@ -113,12 +113,12 @@ class ContactExtractorService:
             # Step 4: Phone number extraction
             if include_phones:
                 logger.info(f"📞 Extracting phone numbers from HTML content (length: {len(result.get('html', ''))})")
-                phone_data = await self._extract_phone_numbers(result)
+                phone_data = self._extract_phone_numbers(result)
                 contact_data['phones'].extend(phone_data)
                 logger.info(f"📞 Phone extraction result: {phone_data}")
             
             # Step 5: Contact form detection
-            contact_forms = await self._detect_contact_forms(result)
+            contact_forms = self._detect_contact_forms(result)
             contact_data['contact_forms'] = contact_forms
             
             # Step 6: Deep crawl for more contact info (if max_depth > 1)
@@ -152,7 +152,8 @@ class ContactExtractorService:
             }
             
         except Exception as e:
-            logger.error(f"Error in contact extraction: {e}")
+            import traceback
+            logger.exception("Error in contact extraction")  # tự động in traceback
             # Giữ kết quả đã có (phones đã tìm được) khi fallback
             safe = locals().get("contact_data") or {"emails": [], "phones": [], "social_links": [], "contact_forms": []}
             return {
@@ -170,7 +171,7 @@ class ContactExtractorService:
                 'total_links_found': len(result.get('urls', [])) if 'result' in locals() else 0
             }
 
-    async def _extract_footer_contact_info(self, result: Dict, base_url: str) -> Dict:
+    def _extract_footer_contact_info(self, result: Dict, base_url: str) -> Dict:
         """Extract contact information from footer section with priority"""
         footer_data = {'emails': [], 'phones': [], 'social_links': [], 'contact_forms': []}
         try:
@@ -326,7 +327,7 @@ class ContactExtractorService:
         # Remove duplicates
         return list(set(social_links))
     
-    async def _extract_phone_numbers(self, result: dict) -> list[str]:
+    def _extract_phone_numbers(self, result: dict) -> list[str]:
         """Extract phone numbers from content with improved patterns"""
         html_content = result.get("html", "") or ""
         soup = BeautifulSoup(html_content, "lxml")
@@ -350,7 +351,7 @@ class ContactExtractorService:
         logger.info("📞 Found %d raw matches, cleaned to %d phones", len(phones), len(out))
         return out
     
-    async def _detect_contact_forms(self, result: Dict) -> List[str]:
+    def _detect_contact_forms(self, result: Dict) -> List[str]:
         """Detect contact form URLs"""
         contact_forms = []
         urls = result.get('urls', [])
@@ -422,7 +423,8 @@ class ContactExtractorService:
                 return self._extract_basic_contact_data(result)  # Bỏ await vì đã là sync
             return {'success': False}
         except Exception as e:
-            logger.error(f"Error crawling contact page {url}: {e}")
+            import traceback
+            logger.exception(f"Error crawling contact page {url}")  # tự động in traceback
             return {'success': False}
     
     def _merge_contact_data(self, a: Dict, b: Dict) -> Dict:
@@ -485,7 +487,8 @@ class ContactExtractorService:
             return result
             
         except Exception as e:
-            logger.error(f"❌ Error in Scrapy contact extraction: {e}")
+            import traceback
+            logger.exception(f"❌ Error in Scrapy contact extraction for {url}")  # tự động in traceback
             return {
                 'success': False,
                 'requested_url': url,

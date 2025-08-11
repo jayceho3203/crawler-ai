@@ -53,7 +53,7 @@ class CareerPagesService:
             # Step 1: Crawl the main page
             result = await crawl_single_url(url)
             
-            if not result['success']:
+            if not result or not result.get('success'):
                 return {
                     'success': False,
                     'error_message': 'Failed to crawl the website',

@@ -36,6 +36,51 @@ class HiddenJobExtractor:
         
         return jobs
     
+    async def extract_job_urls(self, url: str, html_content: str) -> List[str]:
+        """Extract job URLs from career page (requests-only mode)"""
+        try:
+            soup = BeautifulSoup(html_content, 'html.parser')
+            job_urls = []
+            
+            # Look for job links
+            for link in soup.find_all('a', href=True):
+                href = link.get('href')
+                if href and any(keyword in href.lower() for keyword in ['job', 'career', 'position', 'apply']):
+                    full_url = urljoin(url, href)
+                    job_urls.append(full_url)
+            
+            return job_urls[:20]  # Limit to 20 URLs
+        except Exception as e:
+            print(f"Error extracting job URLs: {str(e)}")
+            return []
+    
+    async def extract_job_details(self, job_url: str, html_content: str) -> Dict:
+        """Extract job details from job page (requests-only mode)"""
+        try:
+            soup = BeautifulSoup(html_content, 'html.parser')
+            
+            # Basic job extraction
+            title = soup.find('h1')
+            title_text = title.get_text().strip() if title else "Unknown Job Title"
+            
+            description = soup.find('div', class_='description') or soup.find('div', class_='content')
+            desc_text = description.get_text().strip() if description else ""
+            
+            return {
+                'title': title_text,
+                'description': desc_text,
+                'url': job_url,
+                'company': "Unknown Company"
+            }
+        except Exception as e:
+            print(f"Error extracting job details: {str(e)}")
+            return {
+                'title': "Error",
+                'description': f"Failed to extract: {str(e)}",
+                'url': job_url,
+                'company': "Unknown Company"
+            }
+    
     async def _extract_from_javascript_data_html(self, html_content: str) -> List[Dict]:
         """Extract jobs from JavaScript data in HTML content"""
         jobs = []

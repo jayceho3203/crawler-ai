@@ -121,7 +121,8 @@ class JobExtractionService:
                         logger.warning(f"   ❌ Failed to extract jobs from {career_url}")
                         
                 except Exception as e:
-                    logger.error(f"   ❌ Error processing {career_url}: {e}")
+                    import traceback
+                    logger.exception(f"   ❌ Error processing {career_url}")  # tự động in traceback
                     page_results.append({
                         'url': career_url,
                         'success': False,
@@ -155,7 +156,8 @@ class JobExtractionService:
             }
             
         except Exception as e:
-            logger.error(f"Error in job extraction: {e}")
+            import traceback
+            logger.exception("Error in job extraction")  # tự động in traceback
             return {
                 'success': False,
                 'error_message': str(e),
@@ -650,7 +652,8 @@ class JobExtractionService:
                     }
             else:
                 # Normal job detail page extraction
-                result = await self.extractor.extract_job_details(job_url) # Changed from crawl_single_url to extractor.extract_job_details
+                from .crawler import crawl_single_url
+                result = await crawl_single_url(job_url)
                 
                 if not result['success']:
                     return {
@@ -662,8 +665,8 @@ class JobExtractionService:
                         'crawl_method': 'scrapy_optimized'
                     }
                 
-                            # Extract job details from HTML
-            job_details = self._extract_job_details_from_html(result, job_url)
+                # Extract job details from HTML
+                job_details = self._extract_job_details_from_html(result, job_url)
             
             crawl_time = (time.time() - start_time) # Changed from datetime.now() to time.time()
             
@@ -911,8 +914,9 @@ class JobExtractionService:
             from urllib.parse import urljoin
             import re
             
-            # Crawl career page
-            result = await self.extractor.extract_job_urls(career_page_url) # Changed from crawl_single_url to extractor.extract_job_urls
+            # Crawl career page first to get HTML content
+            from .crawler import crawl_single_url
+            result = await crawl_single_url(career_page_url)
             if not result['success']:
                 return []
             
@@ -1181,7 +1185,8 @@ class JobExtractionService:
             logger.info(f"   🔍 Trying alternative extraction methods for: {career_page_url}")
             
             # Method 1: Try to extract from HTML directly
-            result = await self.extractor.extract_job_details(career_page_url) # Changed from crawl_single_url to extractor.extract_job_details
+            from .crawler import crawl_single_url
+            result = await crawl_single_url(career_page_url)
             if result['success']:
                 html_jobs = self._extract_jobs_from_html_directly(result['html'], career_page_url)
                 if html_jobs:
@@ -1224,7 +1229,8 @@ class JobExtractionService:
             }
             
         except Exception as e:
-            logger.error(f"   ❌ Error in alternative extraction: {e}")
+            import traceback
+            logger.exception("   ❌ Error in alternative extraction")  # tự động in traceback
             return {
                 'success': False,
                 'jobs': [],
@@ -1279,7 +1285,8 @@ class JobExtractionService:
             
             for pattern_url in patterns:
                 try:
-                    result = await self.extractor.extract_job_details(pattern_url) # Changed from crawl_single_url to extractor.extract_job_details
+                    from .crawler import crawl_single_url
+                    result = await crawl_single_url(pattern_url)
                     if result['success']:
                         jobs = self._extract_jobs_from_html_directly(result['html'], pattern_url)
                         if jobs:

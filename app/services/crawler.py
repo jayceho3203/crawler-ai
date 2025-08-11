@@ -29,12 +29,25 @@ async def extract_with_requests(url: str) -> Dict:
     start_time = time.time()
     
     try:
+        # Random User-Agent để giảm 403
+        import random
+        user_agents = [
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 13_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.4 Safari/605.1.15",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/115.0",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        ]
+        
         headers = {
-            'User-Agent': DEFAULT_USER_AGENT,
+            'User-Agent': random.choice(user_agents),
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+            'Accept-Language': 'vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7',
+            'Accept-Encoding': 'gzip, deflate, br',
             'Referer': url,
             'Cache-Control': 'no-cache',
             'Pragma': 'no-cache',
             'DNT': '1',
+            'Upgrade-Insecure-Requests': '1',
             **DEFAULT_HEADERS
         }
         
@@ -46,77 +59,111 @@ async def extract_with_requests(url: str) -> Dict:
         
         connector = aiohttp.TCPConnector(ssl=ssl_context)
         
-        async with aiohttp.ClientSession(connector=connector) as session:
-            async with session.get(url, headers=headers, timeout=40, allow_redirects=True) as response:
-                response.raise_for_status()
-                html_content = await response.text()
+        # Retry mechanism để giảm 403
+        max_retries = 3
+        html_content = None
+        response = None
+        
+        for attempt in range(max_retries):
+            try:
+                async with aiohttp.ClientSession(connector=connector) as session:
+                    async with session.get(url, headers=headers, timeout=40, allow_redirects=True) as response:
+                        if response.status == 403 and attempt < max_retries - 1:
+                            logger.warning(f"⚠️ 403 Forbidden for {url}, retrying... (attempt {attempt + 1}/{max_retries})")
+                            # Thay đổi User-Agent cho lần retry
+                            headers['User-Agent'] = random.choice(user_agents)
+                            await asyncio.sleep(1)  # Delay 1s trước khi retry
+                            continue
+                        
+                        response.raise_for_status()
+                        html_content = await response.text()
+                        break  # Thành công, thoát loop
+                        
+            except aiohttp.ClientResponseError as e:
+                if e.status == 403 and attempt < max_retries - 1:
+                    logger.warning(f"⚠️ 403 Forbidden for {url}, retrying... (attempt {attempt + 1}/{max_retries})")
+                    headers['User-Agent'] = random.choice(user_agents)
+                    await asyncio.sleep(1)
+                    continue
+                else:
+                    raise e
+        
+        if html_content is None:
+            raise Exception("Failed to get HTML content after all retries")
+        
+        # Extract emails using enhanced patterns
+        logger.info(f"🔍 Processing HTML content (length: {len(html_content)})")
+        email_patterns = [
+            r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b',
+            r'[a-zA-Z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}'
+        ]
+        
+        all_emails = []
+        for pattern in email_patterns:
+            emails = re.findall(pattern, html_content, re.IGNORECASE)
+            all_emails.extend(emails)
+        
+        # Clean and validate emails
+        valid_emails = []
+        for email in all_emails:
+            email = email.strip().lower()
+            # Basic validation
+            if '@' in email and '.' in email.split('@')[1]:
+                # Skip common invalid patterns
+                if not any(invalid in email for invalid in [
+                    'cropped-favicon', 'favicon', '.png', '.jpg', '.jpeg', '.gif',
+                    'data:', 'javascript:', 'mailto:', 'tel:', 'http', 'https'
+                ]):
+                    valid_emails.append(email)
+        
+        # Remove duplicates
+        valid_emails = list(set(valid_emails))
+        
+        # Extract phone numbers using regex
+        phone_patterns = [
+            r'\+84\s?\d{1,2}\s?\d{3}\s?\d{3}\s?\d{3}',
+            r'0\d{1,2}\s?\d{3}\s?\d{3}\s?\d{3}',
+            r'\d{10,11}',
+        ]
+        phones = []
+        for pattern in phone_patterns:
+            found_phones = re.findall(pattern, html_content)
+            phones.extend(found_phones)
+        
+        # Extract all URLs (tối ưu - chỉ lấy 50 URLs đầu để giảm memory)
+        urls = []
+        soup = BeautifulSoup(html_content, 'html.parser')
+        for a_tag in soup.find_all('a', href=True)[:50]:  # Reduced to 50 for memory
+            href = a_tag.get('href')
+            if href:
+                # Filter non-HTTP URLs
+                if href.startswith(('mailto:', 'tel:', 'skype:', 'javascript:', 'data:')):
+                    logger.debug(f"⚠️ Skip non-HTTP URL: {href}")
+                    continue
                 
-                # Extract emails using enhanced patterns
-                email_patterns = [
-                    r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b',
-                    r'[a-zA-Z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}'
-                ]
-                
-                all_emails = []
-                for pattern in email_patterns:
-                    emails = re.findall(pattern, html_content, re.IGNORECASE)
-                    all_emails.extend(emails)
-                
-                # Clean and validate emails
-                valid_emails = []
-                for email in all_emails:
-                    email = email.strip().lower()
-                    # Basic validation
-                    if '@' in email and '.' in email.split('@')[1]:
-                        # Skip common invalid patterns
-                        if not any(invalid in email for invalid in [
-                            'cropped-favicon', 'favicon', '.png', '.jpg', '.jpeg', '.gif',
-                            'data:', 'javascript:', 'mailto:', 'tel:', 'http', 'https'
-                        ]):
-                            valid_emails.append(email)
-                
-                # Remove duplicates
-                valid_emails = list(set(valid_emails))
-                
-                # Extract phone numbers using regex
-                phone_patterns = [
-                    r'\+84\s?\d{1,2}\s?\d{3}\s?\d{3}\s?\d{3}',
-                    r'0\d{1,2}\s?\d{3}\s?\d{3}\s?\d{3}',
-                    r'\d{10,11}',
-                ]
-                phones = []
-                for pattern in phone_patterns:
-                    found_phones = re.findall(pattern, html_content)
-                    phones.extend(found_phones)
-                
-                # Extract all URLs (tối ưu - chỉ lấy 50 URLs đầu để giảm memory)
-                urls = []
-                soup = BeautifulSoup(html_content, 'html.parser')
-                for a_tag in soup.find_all('a', href=True)[:50]:  # Reduced to 50 for memory
-                    href = a_tag.get('href')
-                    if href:
-                        full_url = urljoin(url, href)
-                        urls.append(full_url)
-                
-                crawl_time = time.time() - start_time
-                logger.info(f"✅ Requests crawl completed: {url} - {crawl_time:.2f}s")
-                logger.info(f"📊 Emails found: {len(valid_emails)}")
-                logger.info(f"📊 URLs found: {len(urls)}")
-                
-                return {
-                    "success": True,
-                    "status_code": response.status if response else 200,
-                    "url": response.url if response else url,
-                    "html": html_content,
-                    "emails": valid_emails,
-                    "phones": list(set(phones)),
-                    "urls": list(set(urls)),
-                    "crawl_time": crawl_time,
-                    "crawl_method": "requests_optimized"
-                }
+                full_url = urljoin(url, href)
+                urls.append(full_url)
+        
+        crawl_time = time.time() - start_time
+        logger.info(f"✅ Requests crawl completed: {url} - {crawl_time:.2f}s")
+        logger.info(f"📊 Emails found: {len(valid_emails)}")
+        logger.info(f"📊 URLs found: {len(urls)}")
+        
+        return {
+            "success": True,
+            "status_code": response.status if response else 200,
+            "url": response.url if response else url,
+            "html": html_content,
+            "emails": valid_emails,
+            "phones": list(set(phones)),
+            "urls": list(set(urls)),
+            "crawl_time": crawl_time,
+            "crawl_method": "requests_optimized"
+        }
                 
     except Exception as e:
-        logger.error(f"❌ Requests failed for {url}: {e}")
+        import traceback
+        logger.exception(f"❌ Requests failed for {url}")  # tự động in traceback
         return {
             "success": False,
             "error_message": str(e),
@@ -137,6 +184,9 @@ async def crawl_single_url(url: str) -> Dict:
     # Always use requests method (Playwright disabled)
     logger.info(f"🚀 Starting requests crawl for: {url}")
     result = await extract_with_requests(url)
+    
+    # Debug logging
+    logger.info(f"🔍 extract_with_requests result: {result}")
     
     # Cache the result
     cache_result(url, result)
