@@ -12,6 +12,7 @@ from datetime import datetime
 
 from ..utils.constants import CAREER_KEYWORDS_VI, CAREER_SELECTORS, JOB_BOARD_DOMAINS
 from ..utils.contact_extractor import process_extracted_crawl_results, to_text
+from ..utils.text import normalize_url as normalize_url_util
 from .crawler import crawl_single_url
 
 logger = logging.getLogger(__name__)
