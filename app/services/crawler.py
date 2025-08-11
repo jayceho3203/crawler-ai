@@ -152,7 +152,7 @@ async def extract_with_requests(url: str) -> Dict:
         return {
             "success": True,
             "status_code": response.status if response else 200,
-            "url": response.url if response else url,
+            "url": str(response.url) if response else url,
             "html": html_content,
             "emails": valid_emails,
             "phones": list(set(phones)),
@@ -186,7 +186,7 @@ async def crawl_single_url(url: str) -> Dict:
     result = await extract_with_requests(url)
     
     # Debug logging
-    logger.info(f"🔍 extract_with_requests result: {result}")
+    logger.info(f"🔍 extract_with_requests result: success={result.get('success')} status={result.get('status_code')} url={result.get('url')} html_len={len(result.get('html', ''))}")
     
     # Cache the result
     cache_result(url, result)

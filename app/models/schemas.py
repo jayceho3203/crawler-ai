@@ -79,6 +79,13 @@ class CareerPagesRequest(BaseModel):
     strict_filtering: bool = True
     include_job_boards: bool = False
     use_scrapy: bool = True
+    # Apify data fields (optional)
+    Title: Optional[str] = None
+    Phone: Optional[str] = None
+    Website: Optional[str] = None
+    Domain: Optional[str] = None
+    Street: Optional[str] = None
+    location_query_id: Optional[str] = None
 
 class CareerPagesResponse(BaseModel):
     """Response model for career page detection"""
@@ -99,6 +106,8 @@ class CareerPagesResponse(BaseModel):
     # Contact info (if career pages found)
     contact_info: Optional[Dict] = None
     has_contact_info: bool = False
+    # Additional company info from Apify
+    company_title: Optional[str] = None
 
 class JobExtractionRequest(BaseModel):
     """Request model for job extraction"""

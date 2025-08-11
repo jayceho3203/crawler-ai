@@ -47,6 +47,19 @@ async def detect_career_pages_scrapy_main(request: CareerPagesRequest):
     try:
         logger.info(f"🚀 Scrapy career page detection + contact extraction for: {request.url}")
         
+        # Extract Apify data first (phone, title, etc.)
+        apify_data = {}
+        if hasattr(request, 'Title') and request.Title:
+            apify_data['title'] = request.Title
+        if hasattr(request, 'Phone') and request.Phone:
+            apify_data['phone'] = request.Phone
+        if hasattr(request, 'Website') and request.Website:
+            apify_data['website'] = request.Website
+        if hasattr(request, 'Domain') and request.Domain:
+            apify_data['domain'] = request.Domain
+            
+        logger.info(f"📱 Apify data extracted: {apify_data}")
+        
         # Force use Scrapy to detect career pages with optimized settings
         result = await career_pages_service.detect_career_pages(
             url=request.url,
@@ -164,6 +177,29 @@ async def detect_career_pages_scrapy_main(request: CareerPagesRequest):
         response_data = result.copy()
         response_data['contact_info'] = contact_info
         response_data['has_contact_info'] = contact_info is not None
+        
+        # Merge Apify data with crawled contact info
+        if contact_info and apify_data:
+            # Add Apify phone if not already found
+            if apify_data.get('phone') and apify_data['phone'] not in contact_info.get('phones', []):
+                if 'phones' not in contact_info:
+                    contact_info['phones'] = []
+                contact_info['phones'].append(apify_data['phone'])
+                logger.info(f"📱 Added Apify phone: {apify_data['phone']}")
+            
+            # Add Apify title if available
+            if apify_data.get('title'):
+                response_data['company_title'] = apify_data['title']
+                logger.info(f"🏢 Added Apify company title: {apify_data['title']}")
+        
+        # Add missing fields for n8n compatibility
+        response_data['fit_markdown'] = None  # Placeholder for future implementation
+        response_data['meta_description'] = None  # Placeholder for future implementation
+        
+        # Add company title from Apify if available
+        if apify_data.get('title'):
+            response_data['company_title'] = apify_data['title']
+            logger.info(f"🏢 Added company title to response: {apify_data['title']}")
         
         return CareerPagesResponse(**response_data)
         

@@ -242,7 +242,7 @@ def process_extracted_crawl_results(
     
     # Convert base_url to string if it's a URL object
     base_url_str = str(base_url) if hasattr(base_url, 'netloc') else base_url
-    base_domain = urlparse(base_url_str).netloc.lower()
+    base_domain = urlparse(str(base_url_str)).netloc.lower()
     
     for item in raw_extracted_list:
         label = item.get('label', '').lower()
