@@ -26,10 +26,19 @@ class ContactExtractorService:
         ]
         
         self.phone_patterns = [
-            r'(\+84|84|0)[0-9]{9,10}',  # Vietnamese phone
-            r'(\+1|1)?[0-9]{10}',       # US phone
-            r'(\+44|44)[0-9]{10}',      # UK phone
-            r'(\+81|81)[0-9]{9,10}',    # Japan phone
+            # Vietnamese phone patterns (more flexible)
+            r'(\+84|84|0)[\s\-]?[0-9]{1,4}[\s\-]?[0-9]{1,4}[\s\-]?[0-9]{1,4}',  # +84-xxx-xxx-xxx
+            r'(\+84|84|0)[0-9]{9,10}',  # +84xxxxxxxxx
+            r'0[0-9]{9,10}',            # 0xxxxxxxxx
+            
+            # International patterns
+            r'(\+1|1)?[\s\-]?[0-9]{3}[\s\-]?[0-9]{3}[\s\-]?[0-9]{4}',  # US: +1-xxx-xxx-xxxx
+            r'(\+44|44)[\s\-]?[0-9]{1,5}[\s\-]?[0-9]{1,4}[\s\-]?[0-9]{1,4}',  # UK: +44-xxxx-xxx-xxx
+            r'(\+81|81)[\s\-]?[0-9]{1,4}[\s\-]?[0-9]{1,4}[\s\-]?[0-9]{1,4}',  # Japan: +81-xxx-xxx-xxx
+            
+            # Generic patterns (catch all)
+            r'[\+]?[0-9]{1,4}[\s\-]?[0-9]{1,4}[\s\-]?[0-9]{1,4}[\s\-]?[0-9]{1,4}',  # Generic international
+            r'[0-9]{7,15}',  # Any 7-15 digit number (fallback)
         ]
         
         self.social_patterns = {
@@ -73,8 +82,10 @@ class ContactExtractorService:
             
             # Step 4: Phone number extraction
             if include_phones:
+                logger.info(f"📞 Extracting phone numbers from HTML content (length: {len(result.get('html', ''))})")
                 phone_data = await self._extract_phone_numbers(result)
                 contact_data['phones'].extend(phone_data)
+                logger.info(f"📞 Phone extraction result: {phone_data}")
             
             # Step 5: Contact form detection
             contact_forms = await self._detect_contact_forms(result)
@@ -194,23 +205,43 @@ class ContactExtractorService:
         return list(set(social_links))
     
     async def _extract_phone_numbers(self, result: Dict) -> List[str]:
-        """Extract phone numbers from content"""
+        """Extract phone numbers from content with improved patterns"""
         phones = []
         html_content = result.get('html', '')
         
+        # Extract phone numbers using patterns
         for pattern in self.phone_patterns:
-            matches = re.findall(pattern, html_content)
-            phones.extend(matches)
+            matches = re.findall(pattern, html_content, re.IGNORECASE)
+            if isinstance(matches, list):
+                phones.extend(matches)
+            else:
+                phones.append(matches)
         
         # Clean and normalize phone numbers
         cleaned_phones = []
         for phone in phones:
+            if not phone:
+                continue
+                
+            # Convert to string and clean
+            phone_str = str(phone).strip()
+            
             # Remove common prefixes and clean
-            cleaned = re.sub(r'[\s\-\(\)\.]', '', str(phone))
-            if len(cleaned) >= 9:  # Minimum valid length
-                cleaned_phones.append(cleaned)
+            cleaned = re.sub(r'[\s\-\(\)\.]', '', phone_str)
+            
+            # Validate phone number length and format
+            if len(cleaned) >= 7 and len(cleaned) <= 15:  # Reasonable phone length
+                # Remove duplicate consecutive digits (likely false positives)
+                if not re.search(r'(\d)\1{5,}', cleaned):  # No more than 5 consecutive same digits
+                    cleaned_phones.append(cleaned)
         
-        return list(set(cleaned_phones))
+        # Remove duplicates and sort by length (prefer shorter, cleaner numbers)
+        unique_phones = list(set(cleaned_phones))
+        unique_phones.sort(key=len)
+        
+        logger.info(f"📞 Found {len(phones)} raw phone matches, cleaned to {len(unique_phones)} valid phones")
+        
+        return unique_phones
     
     async def _detect_contact_forms(self, result: Dict) -> List[str]:
         """Detect contact form URLs"""
