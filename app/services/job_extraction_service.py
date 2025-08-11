@@ -1,17 +1,26 @@
 # app/services/job_extraction_service.py
 """
-Enhanced job extraction service
+Enhanced job extraction service with conditional Playwright support
 """
 
-import logging
-import asyncio
+import re
 import json
-from typing import List, Dict, Optional
-from datetime import datetime, timedelta
+import logging
+import time
+import os
+from typing import Dict, List, Optional, Tuple
 from urllib.parse import urljoin, urlparse
+from bs4 import BeautifulSoup
+import aiohttp
 
-from .crawler import crawl_single_url
-from .hidden_job_extractor import HiddenJobExtractor
+# Conditional import based on environment variable
+USE_PLAYWRIGHT = os.getenv("USE_PLAYWRIGHT", "0").lower() in ("1", "true", "yes")
+
+if USE_PLAYWRIGHT:
+    from .hidden_job_extractor import HiddenJobExtractor  # Requires playwright
+else:
+    from .hidden_job_extractor_requests import HiddenJobExtractor  # Requests-only
+
 from .job_analyzer import JobAnalyzer
 from .simple_job_formatter import SimpleJobFormatter
 from .job_extractor import extract_jobs_from_page
@@ -19,12 +28,18 @@ from .job_extractor import extract_jobs_from_page
 logger = logging.getLogger(__name__)
 
 class JobExtractionService:
-    """Enhanced service for extracting jobs from career pages"""
+    """Enhanced service for extracting job information from career pages"""
     
     def __init__(self):
-        self.hidden_job_extractor = HiddenJobExtractor()
+        self.extractor = HiddenJobExtractor()
         self.job_analyzer = JobAnalyzer()
         self.simple_formatter = SimpleJobFormatter()
+        
+        # Log which extractor is being used
+        if USE_PLAYWRIGHT:
+            logger.info("🚀 Using Playwright-based job extractor")
+        else:
+            logger.info("📡 Using requests-based job extractor (Render compatible)")
         
         # Job type mappings
         self.job_type_mappings = {
@@ -54,7 +69,7 @@ class JobExtractionService:
         """
         Extract jobs from multiple career pages with advanced filtering
         """
-        start_time = datetime.now()
+        start_time = time.time() # Changed from datetime.now() to time.time()
         
         try:
             logger.info(f"🔍 Starting job extraction from {len(career_page_urls)} career pages")
@@ -125,7 +140,7 @@ class JobExtractionService:
             formatted_jobs = self.simple_formatter.format_jobs_list(all_jobs)
             job_summary = self.simple_formatter.get_job_summary(all_jobs)
             
-            crawl_time = (datetime.now() - start_time).total_seconds()
+            crawl_time = (time.time() - start_time) # Changed from datetime.now() to time.time()
             
             return {
                 'success': True,
@@ -147,7 +162,7 @@ class JobExtractionService:
                 'success': False,
                 'error_message': str(e),
                 'requested_urls': career_page_urls,
-                'crawl_time': (datetime.now() - start_time).total_seconds()
+                'crawl_time': (time.time() - start_time) # Changed from datetime.now() to time.time()
             }
     
     async def _extract_jobs_from_single_page(self, career_url: str, max_jobs: int,
@@ -330,11 +345,11 @@ class JobExtractionService:
             # Calculate the filter date
             now = datetime.now()
             if posted_date_filter == 'last_week':
-                filter_date = now - timedelta(days=7)
+                filter_date = now - datetime.timedelta(days=7)
             elif posted_date_filter == 'last_month':
-                filter_date = now - timedelta(days=30)
+                filter_date = now - datetime.timedelta(days=30)
             elif posted_date_filter == 'last_3_months':
-                filter_date = now - timedelta(days=90)
+                filter_date = now - datetime.timedelta(days=90)
             else:
                 return True  # Include if filter is not recognized
             
@@ -448,7 +463,7 @@ class JobExtractionService:
         """
         Extract jobs using optimized Scrapy spider
         """
-        start_time = datetime.now()
+        start_time = time.time() # Changed from datetime.now() to time.time()
         
         try:
             logger.info(f"🚀 Starting Scrapy job extraction from {len(career_page_urls)} career pages")
@@ -479,7 +494,7 @@ class JobExtractionService:
                 'error_message': str(e),
                 'jobs': [],
                 'total_jobs_found': 0,
-                'crawl_time': (datetime.now() - start_time).total_seconds(),
+                'crawl_time': (time.time() - start_time), # Changed from datetime.now() to time.time()
                 'crawl_method': 'scrapy_optimized'
             }
     
@@ -487,7 +502,7 @@ class JobExtractionService:
         """
         Extract job URLs from career page - simplified output for N8N workflow
         """
-        start_time = datetime.now()
+        start_time = time.time() # Changed from datetime.now() to time.time()
         
         try:
             logger.info(f"🔗 Extracting job URLs from: {career_page_url}")
@@ -502,7 +517,7 @@ class JobExtractionService:
                 total_jobs_found = len(job_urls)
                 logger.info(f"   ✅ Found {len(job_urls)} job URLs - using individual job pages")
                 
-                crawl_time = (datetime.now() - start_time).total_seconds()
+                crawl_time = (time.time() - start_time) # Changed from datetime.now() to time.time()
                 
                 logger.info(f"✅ Job URL extraction completed:")
                 logger.info(f"   📊 Total jobs found: {total_jobs_found}")
@@ -557,7 +572,7 @@ class JobExtractionService:
                     else:
                         logger.warning(f"   📊 No jobs found with any method")
                 
-                crawl_time = (datetime.now() - start_time).total_seconds()
+                crawl_time = (time.time() - start_time) # Changed from datetime.now() to time.time()
                 
                 logger.info(f"✅ Job URL extraction completed:")
                 logger.info(f"   📊 Total jobs found: {total_jobs_found}")
@@ -593,7 +608,7 @@ class JobExtractionService:
                 'error_message': str(e),
                 'total_jobs_found': 0,
                 'has_individual_urls': False,
-                'crawl_time': (datetime.now() - start_time).total_seconds(),
+                'crawl_time': (time.time() - start_time), # Changed from datetime.now() to time.time()
                 'crawl_method': 'scrapy_optimized'
             }
     
@@ -601,7 +616,7 @@ class JobExtractionService:
         """
         Extract detailed job information from a single job URL
         """
-        start_time = datetime.now()
+        start_time = time.time() # Changed from datetime.now() to time.time()
         
         try:
             logger.info(f"📄 Extracting job details from: {job_url}")
@@ -637,7 +652,7 @@ class JobExtractionService:
                     }
             else:
                 # Normal job detail page extraction
-                result = await crawl_single_url(job_url)
+                result = await self.extractor.extract_job_details(job_url) # Changed from crawl_single_url to extractor.extract_job_details
                 
                 if not result['success']:
                     return {
@@ -645,14 +660,14 @@ class JobExtractionService:
                         'job_url': job_url,
                         'error_message': 'Failed to crawl job page',
                         'job_details': {},
-                        'crawl_time': (datetime.now() - start_time).total_seconds(),
+                        'crawl_time': (time.time() - start_time), # Changed from datetime.now() to time.time()
                         'crawl_method': 'scrapy_optimized'
                     }
                 
                 # Extract job details from HTML
                 job_details = await self._extract_job_details_from_html(result, job_url)
             
-            crawl_time = (datetime.now() - start_time).total_seconds()
+            crawl_time = (time.time() - start_time) # Changed from datetime.now() to time.time()
             
             logger.info(f"✅ Extracted job details from {job_url}")
             
@@ -671,7 +686,7 @@ class JobExtractionService:
                 'job_url': job_url,
                 'error_message': str(e),
                 'job_details': {},
-                'crawl_time': (datetime.now() - start_time).total_seconds(),
+                'crawl_time': (time.time() - start_time), # Changed from datetime.now() to time.time()
                 'crawl_method': 'scrapy_optimized'
             }
     
@@ -899,7 +914,7 @@ class JobExtractionService:
             import re
             
             # Crawl career page
-            result = await crawl_single_url(career_page_url)
+            result = await self.extractor.extract_job_urls(career_page_url) # Changed from crawl_single_url to extractor.extract_job_urls
             if not result['success']:
                 return []
             
@@ -1168,7 +1183,7 @@ class JobExtractionService:
             logger.info(f"   🔍 Trying alternative extraction methods for: {career_page_url}")
             
             # Method 1: Try to extract from HTML directly
-            result = await crawl_single_url(career_page_url)
+            result = await self.extractor.extract_job_details(career_page_url) # Changed from crawl_single_url to extractor.extract_job_details
             if result['success']:
                 html_jobs = self._extract_jobs_from_html_directly(result['html'], career_page_url)
                 if html_jobs:
@@ -1266,7 +1281,7 @@ class JobExtractionService:
             
             for pattern_url in patterns:
                 try:
-                    result = await crawl_single_url(pattern_url)
+                    result = await self.extractor.extract_job_details(pattern_url) # Changed from crawl_single_url to extractor.extract_job_details
                     if result['success']:
                         jobs = self._extract_jobs_from_html_directly(result['html'], pattern_url)
                         if jobs:
@@ -1281,96 +1296,90 @@ class JobExtractionService:
             return []
     
     async def _extract_jobs_from_javascript(self, career_page_url: str) -> List[Dict]:
-        """Extract jobs from JavaScript data using Playwright"""
+        """Extract jobs from JavaScript data using HTML parsing (requests-only mode)"""
         try:
-            from playwright.async_api import async_playwright
+            # Use requests to get HTML content instead of Playwright
+            import aiohttp
             
             jobs = []
             
-            async with async_playwright() as p:
-                browser = await p.chromium.launch(headless=True)
-                page = await browser.new_page()
-                
-                try:
-                    await page.goto(career_page_url, wait_until='networkidle')
-                    
-                    # Wait for potential dynamic content
-                    await page.wait_for_timeout(3000)
-                    
-                    # Method 1: Extract from JavaScript variables
-                    js_jobs = await page.evaluate("""
-                        () => {
-                            const jobs = [];
-                            
-                            // Look for common job data variables
-                            const possibleVars = [
-                                'jobs', 'jobList', 'careers', 'positions', 'openings',
-                                'jobData', 'careerData', 'positionData'
-                            ];
-                            
-                            for (const varName of possibleVars) {
-                                if (window[varName] && Array.isArray(window[varName])) {
-                                    return window[varName];
-                                }
-                            }
-                            
-                            // Look for data attributes
-                            const jobElements = document.querySelectorAll('[data-job], [data-career], [data-position]');
-                            for (const element of jobElements) {
-                                const jobData = element.dataset;
-                                if (jobData.title || jobData.name) {
-                                    jobs.push({
-                                        title: jobData.title || jobData.name,
-                                        company: jobData.company || '',
-                                        location: jobData.location || '',
-                                        description: jobData.description || '',
-                                        url: jobData.url || window.location.href
-                                    });
-                                }
-                            }
-                            
-                            return jobs;
-                        }
-                    """)
-                    
-                    if js_jobs and len(js_jobs) > 0:
-                        logger.info(f"   📊 Found {len(js_jobs)} jobs from JavaScript variables")
-                        for job in js_jobs:
-                            jobs.append({
-                                'title': job.get('title', ''),
-                                'company': job.get('company', ''),
-                                'location': job.get('location', ''),
-                                'job_type': job.get('job_type', 'Full-time'),
-                                'salary': job.get('salary', ''),
-                                'posted_date': job.get('posted_date', ''),
-                                'url': job.get('url', career_page_url),
-                                'description': job.get('description', ''),
-                                'requirements': job.get('requirements', ''),
-                                'benefits': job.get('benefits', '')
-                            })
-                    
-                    # Method 2: Handle accordions/tabs
-                    accordion_jobs = await self._extract_jobs_from_accordions(page)
-                    jobs.extend(accordion_jobs)
-                    
-                    # Method 3: Handle modals
-                    modal_jobs = await self._extract_jobs_from_modals(page)
-                    jobs.extend(modal_jobs)
-                    
-                    # Method 4: Handle AJAX loading
-                    ajax_jobs = await self._extract_jobs_from_ajax(page)
-                    jobs.extend(ajax_jobs)
-                    
-                    # Method 5: Handle iframes
-                    iframe_jobs = await self._extract_jobs_from_iframes(page)
-                    jobs.extend(iframe_jobs)
-                    
-                    # Method 6: Handle shadow DOM
-                    shadow_jobs = await self._extract_jobs_from_shadow_dom(page)
-                    jobs.extend(shadow_jobs)
-                    
-                finally:
-                    await browser.close()
+            async with aiohttp.ClientSession() as session:
+                async with session.get(career_page_url) as response:
+                    if response.status == 200:
+                        html_content = await response.text()
+                        
+                        # Parse HTML with BeautifulSoup
+                        from bs4 import BeautifulSoup
+                        soup = BeautifulSoup(html_content, 'html.parser')
+                        
+                        # Method 1: Extract from JavaScript variables in script tags
+                        scripts = soup.find_all('script')
+                        for script in scripts[:5]:  # Limit to first 5 scripts
+                            content = script.string or script.get_text()
+                            if content:
+                                # Look for common job data variables
+                                patterns = [
+                                    r'jobs\s*:\s*(\[.*?\])',
+                                    r'jobList\s*:\s*(\[.*?\])',
+                                    r'careers\s*:\s*(\[.*?\])',
+                                    r'positions\s*:\s*(\[.*?\])',
+                                    r'openings\s*:\s*(\[.*?\])',
+                                    r'jobData\s*:\s*(\[.*?\])',
+                                    r'careerData\s*:\s*(\[.*?\])',
+                                    r'positionData\s*:\s*(\[.*?\])'
+                                ]
+                                
+                                for pattern in patterns:
+                                    matches = re.findall(pattern, content, re.IGNORECASE | re.DOTALL)
+                                    for match in matches:
+                                        try:
+                                            js_jobs = json.loads(match)
+                                            if isinstance(js_jobs, list) and len(js_jobs) > 0:
+                                                logger.info(f"   📊 Found {len(js_jobs)} jobs from JavaScript variables")
+                                                for job in js_jobs[:10]:  # Limit to 10 jobs
+                                                    if isinstance(job, dict):
+                                                        jobs.append({
+                                                            'title': job.get('title', ''),
+                                                            'company': job.get('company', ''),
+                                                            'location': job.get('location', ''),
+                                                            'job_type': job.get('job_type', 'Full-time'),
+                                                            'salary': job.get('salary', ''),
+                                                            'posted_date': job.get('posted_date', ''),
+                                                            'url': job.get('url', career_page_url),
+                                                            'description': job.get('description', ''),
+                                                            'requirements': job.get('requirements', ''),
+                                                            'benefits': job.get('benefits', '')
+                                                        })
+                                                break  # Found jobs, no need to check other patterns
+                                        except json.JSONDecodeError:
+                                            continue
+                        
+                        # Method 2: Extract from data attributes
+                        data_elements = soup.find_all(attrs={'data-job': True})
+                        for element in data_elements[:10]:  # Limit to 10 elements
+                            try:
+                                job_data = element.get('data-job')
+                                if job_data:
+                                    if isinstance(job_data, str):
+                                        job_json = json.loads(job_data)
+                                    else:
+                                        job_json = job_data
+                                    
+                                    if isinstance(job_json, dict):
+                                        jobs.append({
+                                            'title': job_json.get('title', ''),
+                                            'company': job_json.get('company', ''),
+                                            'location': job_json.get('location', ''),
+                                            'job_type': job_json.get('job_type', 'Full-time'),
+                                            'salary': job_json.get('salary', ''),
+                                            'posted_date': job_json.get('posted_date', ''),
+                                            'url': job_json.get('url', career_page_url),
+                                            'description': job_json.get('description', ''),
+                                            'requirements': job_json.get('requirements', ''),
+                                            'benefits': job_json.get('benefits', '')
+                                        })
+                            except (json.JSONDecodeError, AttributeError):
+                                continue
             
             return jobs
             

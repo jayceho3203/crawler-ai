@@ -19,5 +19,7 @@ services:
         value: "/opt/render/project/src"
       - key: DISABLE_PLAYWRIGHT
         value: "1"
+      - key: USE_PLAYWRIGHT
+        value: "0"
     healthCheckPath: /health
     autoDeploy: true 
