@@ -123,16 +123,12 @@ async def detect_career_pages_scrapy(request: CareerPagesRequest):
                 logger.warning(f"⚠️ Contact extraction failed: {contact_error}")
                 contact_info = None
 
-        # If Scrapy provided contact_info but it's empty, enhance with deep-crawl service
-        try:
-            needs_enhance = (
-                contact_info is None or (
-                    isinstance(contact_info, dict)
-                    and not contact_info.get("emails")
-                    and not contact_info.get("phones")
-                )
-            )
-            if needs_enhance:
+        # Step 2: Only crawl contact info if we found career pages
+        if result.get('success') and result.get('career_pages') and len(result['career_pages']) > 0:
+            logger.info(f"✅ Found {len(result['career_pages'])} career pages, now extracting contact info")
+            
+            # Extract contact info from career pages
+            try:
                 enhanced = await contact_service.extract_contact_info(
                     url=request.url,
                     include_social=True,
@@ -147,9 +143,13 @@ async def detect_career_pages_scrapy(request: CareerPagesRequest):
                     "contact_forms": enhanced.get("contact_forms", []),
                     "website": request.url,
                 }
-                logger.info("🔁 Enhanced contact info by deep-crawling contact/about pages")
-        except Exception as enhance_error:
-            logger.warning(f"⚠️ Enhancement step failed: {enhance_error}")
+                logger.info(f"✅ Contact info extracted from career pages: {len(contact_info['emails'])} emails, {len(contact_info['phones'])} phones")
+            except Exception as enhance_error:
+                logger.warning(f"⚠️ Contact extraction from career pages failed: {enhance_error}")
+                contact_info = None
+        else:
+            logger.info(f"⚠️ No career pages found, skipping contact extraction")
+            contact_info = None
         
         # Add contact info to response
         response_data = result.copy()

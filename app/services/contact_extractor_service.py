@@ -11,7 +11,7 @@ import asyncio
 from datetime import datetime
 
 from ..utils.constants import CAREER_KEYWORDS_VI, CAREER_SELECTORS, JOB_BOARD_DOMAINS
-from ..utils.contact_extractor import process_extracted_crawl_results
+from ..utils.contact_extractor import process_extracted_crawl_results, to_text
 from .crawler import crawl_single_url
 
 logger = logging.getLogger(__name__)
@@ -112,11 +112,23 @@ class ContactExtractorService:
             
         except Exception as e:
             logger.error(f"Error in contact extraction: {e}")
+            # Return basic data even if processing fails
+            basic_data = await self._extract_basic_contact_data(result) if 'result' in locals() else {
+                'emails': [], 'phones': [], 'social_links': [], 'contact_forms': []
+            }
             return {
-                'success': False,
+                'success': True,  # Still return success with basic data
                 'error_message': str(e),
                 'requested_url': url,
-                'crawl_time': (datetime.now() - start_time).total_seconds()
+                'crawl_time': (datetime.now() - start_time).total_seconds(),
+                'crawl_method': result.get('crawl_method') if 'result' in locals() else 'requests',
+                'emails': basic_data.get('emails', []),
+                'phones': basic_data.get('phones', []),
+                'social_links': basic_data.get('social_links', []),
+                'contact_forms': basic_data.get('contact_forms', []),
+                'raw_extracted_data': basic_data,
+                'total_pages_crawled': 1,
+                'total_links_found': len(result.get('urls', [])) if 'result' in locals() else 0
             }
     
     async def _extract_basic_contact_data(self, result: Dict) -> Dict:
@@ -130,9 +142,14 @@ class ContactExtractorService:
         
         # Extract emails from HTML content
         html_content = result.get('html', '')
-        for pattern in self.email_patterns:
-            emails = re.findall(pattern, html_content, re.IGNORECASE)
-            contact_data['emails'].extend(emails)
+        if html_content:
+            for pattern in self.email_patterns:
+                try:
+                    emails = re.findall(pattern, html_content, re.IGNORECASE)
+                    contact_data['emails'].extend(emails)
+                except Exception as e:
+                    logger.warning(f"Error extracting emails with pattern {pattern}: {e}")
+                    continue
         
         # Remove duplicates and normalize
         contact_data['emails'] = list(set([email.lower() for email in contact_data['emails']]))
@@ -164,9 +181,14 @@ class ContactExtractorService:
         
         # Check URLs for social media
         for url in urls:
-            for platform in self.social_patterns.keys():
-                if platform in url.lower():
-                    social_links.append(url)
+            try:
+                url_str = to_text(url)  # Convert URL objects to string
+                for platform in self.social_patterns.keys():
+                    if platform in url_str.lower():
+                        social_links.append(url_str)
+            except Exception as e:
+                logger.warning(f"Error processing URL {url}: {e}")
+                continue
         
         # Remove duplicates
         return list(set(social_links))
@@ -198,9 +220,14 @@ class ContactExtractorService:
         contact_keywords = ['contact', 'lien-he', 'lienhe', 'about', 'about-us', 'gioi-thieu']
         
         for url in urls:
-            url_lower = url.lower()
-            if any(keyword in url_lower for keyword in contact_keywords):
-                contact_forms.append(url)
+            try:
+                url_str = to_text(url)  # Convert URL objects to string
+                url_lower = url_str.lower()
+                if any(keyword in url_lower for keyword in contact_keywords):
+                    contact_forms.append(url_str)
+            except Exception as e:
+                logger.warning(f"Error processing contact form URL {url}: {e}")
+                continue
         
         return list(set(contact_forms))
     

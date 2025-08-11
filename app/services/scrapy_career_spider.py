@@ -7,6 +7,9 @@ Memory-optimized for Render free tier
 import scrapy
 import json
 import logging
+import time
+import os
+import tempfile
 from datetime import datetime
 from typing import Dict, List
 from scrapy.crawler import CrawlerProcess
@@ -14,6 +17,38 @@ from scrapy.utils.project import get_project_settings
 from scrapy.settings import Settings
 
 logger = logging.getLogger(__name__)
+
+def read_json_with_retry(path: str, tries: int = 20, delay: float = 0.25):
+    """Read JSON file with retry to handle file writing race conditions"""
+    last_err = None
+    for attempt in range(tries):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)  # Read full JSON
+        except json.JSONDecodeError as e:
+            last_err = e
+            logger.warning(f"JSON decode attempt {attempt + 1}/{tries} failed: {e}")
+            time.sleep(delay)  # Wait for writer to finish
+        except FileNotFoundError as e:
+            last_err = e
+            logger.warning(f"File not found attempt {attempt + 1}/{tries}: {e}")
+            time.sleep(delay)
+    raise RuntimeError(f"Cannot read valid JSON at {path} after {tries} attempts: {last_err}")
+
+def atomic_write_json(data, final_path: str):
+    """Write JSON file atomically to avoid partial reads"""
+    d = os.path.dirname(final_path) or "."
+    fd, tmp = tempfile.mkstemp(dir=d, prefix=".tmp_scrapy_", suffix=".json")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, final_path)  # Atomic operation
+    except Exception as e:
+        try:
+            os.unlink(tmp)
+        except:
+            pass
+        raise e
 
 class OptimizedCareerSpider(scrapy.Spider):
     """
@@ -508,9 +543,8 @@ class OptimizedCareerSpider(scrapy.Spider):
         result_file = f'scrapy_result_{timestamp}.json'
         
         try:
-            with open(result_file, 'w', encoding='utf-8') as f:
-                json.dump(result, f, ensure_ascii=False, indent=2)
-            logger.info(f"✅ Result saved to: {result_file}")
+            atomic_write_json(result, result_file)
+            logger.info(f"✅ Result saved atomically to: {result_file}")
             logger.info(f"📊 Contact info: {len(contact_info['emails'])} emails, {len(contact_info['phones'])} phones")
         except Exception as e:
             logger.error(f"❌ Error saving result: {e}")
@@ -669,29 +703,10 @@ print("Scrapy completed successfully")
             else:
                 raise FileNotFoundError("No result files found")
             
-            with open(result_file, 'r') as f:
-                content = f.read()
-                logger.info(f"🔍 Raw file content: {content[:200]}...")  # Debug log
-                
-                # Handle multiple JSON objects or extra data
-                try:
-                    result = json.loads(content)
-                    logger.info(f"🔍 Parsed JSON result type: {type(result)}")
-                    logger.info(f"🔍 Parsed JSON result: {result}")
-                except json.JSONDecodeError:
-                    # Try to find the last valid JSON object
-                    lines = content.strip().split('\n')
-                    logger.info(f"🔍 Trying to parse {len(lines)} lines...")
-                    for line in reversed(lines):
-                        if line.strip():
-                            try:
-                                result = json.loads(line)
-                                logger.info(f"🔍 Found valid JSON in line: {result}")
-                                break
-                            except json.JSONDecodeError:
-                                continue
-                    else:
-                        raise json.JSONDecodeError("No valid JSON found", content, 0)
+            # Read JSON with retry to handle file writing race conditions
+            result = read_json_with_retry(result_file)
+            logger.info(f"🔍 Successfully parsed JSON result type: {type(result)}")
+            logger.info(f"🔍 Parsed JSON result keys: {list(result.keys()) if isinstance(result, dict) else 'not dict'}")
             
             # Cleanup result file
             try:

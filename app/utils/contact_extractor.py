@@ -5,11 +5,26 @@ Refactored from contact_extractor.py
 """
 
 import re
-from urllib.parse import urlparse, urljoin, unquote
+from urllib.parse import urlparse, urljoin, unquote, ParseResult
 from typing import List, Dict, Set, Optional
+
+try:
+    from yarl import URL
+except ImportError:
+    URL = None
 
 # Import constants from the main constants file
 from .constants import CAREER_KEYWORDS_VI, CAREER_EXACT_PATTERNS, REJECTED_NON_CAREER_PATHS
+
+def to_text(v) -> str:
+    """Convert any value to text, handling URL objects and bytes"""
+    if isinstance(v, (bytes, bytearray)):
+        return v.decode("utf-8", errors="ignore")
+    if URL and isinstance(v, URL):
+        return str(v)
+    if isinstance(v, ParseResult):
+        return v.geturl()
+    return str(v)
 
 # Social media domains
 SOCIAL_DOMAINS: Set[str] = {
@@ -186,6 +201,10 @@ def extract_embedded_url(href_content: str, base_domain_netloc: Optional[str] = 
 def normalize_url(url_str: str, base_url: str) -> str:
     """Normalize URL with proper handling of various formats"""
     try:
+        # Convert URL objects to string first
+        url_str = to_text(url_str)
+        base_url = to_text(base_url)
+        
         # Clean the URL
         url_str = url_str.strip()
         
@@ -250,7 +269,9 @@ def process_extracted_crawl_results(
         
         # Process URLs - only contact-related URLs
         elif label == 'url':
-            normalized_url = normalize_url(value, base_url)
+            # Convert value to text first to handle URL objects
+            url_value = to_text(value)
+            normalized_url = normalize_url(url_value, base_url)
             
             # Reject non-HTTP URLs (mailto, tel, javascript, etc.)
             if not normalized_url.startswith(('http://', 'https://')):
