@@ -75,7 +75,7 @@ class CareerPagesRequest(BaseModel):
     """Request model for career page detection"""
     url: str
     include_subdomain_search: bool = False
-    max_pages_to_scan: int = 100
+    max_pages_to_scan: int = 30
     strict_filtering: bool = True
     include_job_boards: bool = False
     use_scrapy: bool = True
