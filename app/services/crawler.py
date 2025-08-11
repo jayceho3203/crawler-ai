@@ -127,9 +127,11 @@ async def extract_with_requests(url: str) -> Dict:
 
 async def crawl_single_url(url: str) -> Dict:
     """Crawl single URL using requests method (Playwright disabled for Render)"""
-    # Check cache first
+    
+    # Check cache first (chỉ trả về nếu có HTML đầy đủ)
     cached = get_cached_result(url)
-    if cached:
+    if cached and cached.get("html") and len(cached["html"]) > 500:  # tuỳ ngưỡng
+        logger.info(f"📋 Using cached result for {url} (HTML length: {len(cached['html'])})")
         return cached
     
     # Always use requests method (Playwright disabled)

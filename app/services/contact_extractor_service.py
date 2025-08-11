@@ -10,10 +10,31 @@ from urllib.parse import urljoin, urlparse
 import asyncio
 from datetime import datetime
 
+# utils for phone extraction
+import re
+
+WS_CLASS = r"\s\u00A0\u2000-\u200B"            # space + NBSP + zero-width range
+SEP_CLASS = rf"[{WS_CLASS}\.\-\(\)]"          # cho phép . - ( ) và các khoảng trắng unicode
+SEP = rf"{SEP_CLASS}*"                        # 0+ ký tự phân tách
+
+def normalize_text(s: str) -> str:
+    # gom mọi loại khoảng trắng về 1 space
+    return re.sub(rf"[{WS_CLASS}]+", " ", s).strip()
+
+def clean_phone(candidate: str) -> str | None:
+    # giữ + và số
+    s = re.sub(r"[^\d+]", "", candidate)
+    if s.startswith("+84"):
+        s = "0" + s[3:]
+    s = re.sub(r"\D", "", s)
+    # VN: di động 10 số; cố định 10–11 số (tùy mã vùng)
+    return s if 10 <= len(s) <= 11 else None
+
 from ..utils.constants import CAREER_KEYWORDS_VI, CAREER_SELECTORS, JOB_BOARD_DOMAINS
 from ..utils.contact_extractor import process_extracted_crawl_results, to_text
 from ..utils.text import normalize_url as normalize_url_util
 from .crawler import crawl_single_url
+from bs4 import BeautifulSoup
 
 logger = logging.getLogger(__name__)
 
@@ -26,21 +47,11 @@ class ContactExtractorService:
             r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
         ]
         
-        self.phone_patterns = [
-            # Vietnamese phone patterns (more flexible)
-            r'(\+84|84|0)[\s\-]?[0-9]{1,4}[\s\-]?[0-9]{1,4}[\s\-]?[0-9]{1,4}',  # +84-xxx-xxx-xxx
-            r'(\+84|84|0)[0-9]{9,10}',  # +84xxxxxxxxx
-            r'0[0-9]{9,10}',            # 0xxxxxxxxx
-            
-            # International patterns
-            r'(\+1|1)?[\s\-]?[0-9]{3}[\s\-]?[0-9]{3}[\s\-]?[0-9]{4}',  # US: +1-xxx-xxx-xxxx
-            r'(\+44|44)[\s\-]?[0-9]{1,5}[\s\-]?[0-9]{1,4}[\s\-]?[0-9]{1,4}',  # UK: +44-xxxx-xxx-xxx
-            r'(\+81|81)[\s\-]?[0-9]{1,4}[\s\-]?[0-9]{1,4}[\s\-]?[0-9]{1,4}',  # Japan: +81-xxx-xxx-xxx
-            
-            # Generic patterns (catch all)
-            r'[\+]?[0-9]{1,4}[\s\-]?[0-9]{1,4}[\s\-]?[0-9]{1,4}[\s\-]?[0-9]{1,4}',  # Generic international
-            r'[0-9]{7,15}',  # Any 7-15 digit number (fallback)
-        ]
+        # Regex VN (không dùng capture, cho phép phân tách linh hoạt)
+        from ..utils.text import SEP
+        self.VN_PHONE_RX = re.compile(
+            rf"(?<!\d)(?:\+?84|0)(?:{SEP}\d){{8,10}}(?!\d)"
+        )
         
         self.social_patterns = {
             'facebook': r'facebook\.com/[^/\s]+',
@@ -74,19 +85,29 @@ class ContactExtractorService:
                 }
             
             # Step 2: Extract basic contact data (prioritize footer)
-            contact_data = await self._extract_basic_contact_data(result)
+            contact_data = self._extract_basic_contact_data(result)
             
-            # Step 2.5: PRIORITIZE FOOTER CONTACT INFO
+            # Step 2.5: PRIORITIZE FOOTER CONTACT INFO (sử dụng utils mới)
             logger.info(f"🔍 Prioritizing footer contact extraction...")
-            footer_contact_data = await self._extract_footer_contact_info(result, url)
-            if footer_contact_data:
-                logger.info(f"✅ Found footer contact info: {footer_contact_data}")
-                # Merge footer data with priority
-                contact_data = self._merge_contact_data_with_priority(footer_contact_data, contact_data)
+            try:
+                from ..utils.contact_footer import extract_footer_contacts_from_html
+                footer_contact_data = extract_footer_contacts_from_html(result.get('html', ''))
+                if footer_contact_data and (footer_contact_data.get('phones') or footer_contact_data.get('emails')):
+                    logger.info(f"✅ Found footer contact info: {footer_contact_data}")
+                    # Merge footer data with priority
+                    contact_data = self._merge_contact_data_with_priority(footer_contact_data, contact_data)
+                else:
+                    logger.info("⚠️ No footer contact info found")
+            except Exception as e:
+                logger.warning(f"⚠️ Footer extraction failed: {e}")
+                # Fallback to old method
+                footer_contact_data = await self._extract_footer_contact_info(result, url)
+                if footer_contact_data:
+                    contact_data = self._merge_contact_data_with_priority(footer_contact_data, contact_data)
             
             # Step 3: Enhanced social media detection
             if include_social:
-                social_data = await self._extract_social_media_enhanced(result, url)
+                social_data = self._extract_social_media_enhanced(result, url)
                 contact_data['social_links'].extend(social_data)
             
             # Step 4: Phone number extraction
@@ -133,8 +154,8 @@ class ContactExtractorService:
         except Exception as e:
             logger.error(f"Error in contact extraction: {e}")
             # Return basic data even if processing fails
-            basic_data = await self._extract_basic_contact_data(result) if 'result' in locals() else {
-                'emails': [], 'phones': [], 'social_links': [], 'contact_forms': []
+            basic_data = self._extract_basic_contact_data(result) if 'result' in locals() else {
+                'emails': [], 'phones': [], 'contact_forms': []
             }
             return {
                 'success': True,  # Still return success with basic data
@@ -153,74 +174,57 @@ class ContactExtractorService:
 
     async def _extract_footer_contact_info(self, result: Dict, base_url: str) -> Dict:
         """Extract contact information from footer section with priority"""
-        footer_data = {
-            'emails': [],
-            'phones': [],
-            'social_links': [],
-            'contact_forms': []
-        }
-        
+        footer_data = {'emails': [], 'phones': [], 'social_links': [], 'contact_forms': []}
         try:
-            html_content = result.get('html', '')
-            
-            # Look for footer section (common footer selectors)
-            footer_selectors = [
-                'footer',
-                '.footer',
-                '#footer',
-                '.site-footer',
-                '.main-footer',
-                '.bottom-footer'
-            ]
-            
-            # Extract phone numbers from footer (priority) - Always try to extract phones
-            footer_phones = await self._extract_phone_numbers_from_footer(html_content)
-            footer_data['phones'].extend(footer_phones)
-            logger.info(f"📞 Footer phones found: {footer_phones}")
-            
-            # Extract emails from footer (priority) - Always try to extract emails
-            footer_emails = await self._extract_emails_from_footer(html_content)
+            html = result.get('html', '') or ''
+            soup = BeautifulSoup(html, "lxml")
+
+            # chọn footer linh hoạt
+            footer = self.pick_footer_node(soup)
+
+            # 1) lấy số từ tel: trước
+            tel_phones = []
+            for a in footer.select('a[href^="tel:"]'):
+                number = a.get('href', '')[4:]
+                n = clean_phone(number)
+                if n and n not in tel_phones:
+                    tel_phones.append(n)
+
+            # 2) lấy từ text node
+            text = normalize_text(footer.get_text(" ", strip=True))
+            text_phones = self._extract_phones_from_text(text)
+
+            phones = list(dict.fromkeys(tel_phones + text_phones))  # dedupe giữ thứ tự
+            footer_data['phones'].extend(phones)
+
+            # emails (giữ logic cũ của bạn)
+            footer_emails = self._extract_emails_from_footer(html)
             footer_data['emails'].extend(footer_emails)
-            logger.info(f"📧 Footer emails found: {footer_emails}")
-            
+
+            # log debug chi tiết
+            preview = (normalize_text(footer.get_text(" ", strip=True))[:200])
+            logger.debug("🦶 footer tag=%s preview=%s", getattr(footer,'name',None), preview)
+            logger.info("📦 footer phones (tel+text) = %s", phones)
             return footer_data
-            
         except Exception as e:
             logger.warning(f"⚠️ Footer contact extraction failed: {e}")
             return footer_data
 
-    async def _extract_phone_numbers_from_footer(self, html_content: str) -> List[str]:
+    def _extract_phone_numbers_from_footer(self, html_content: str) -> List[str]:
         """Extract phone numbers specifically from footer content"""
-        phones = []
-        
-        # Vietnamese phone patterns (footer specific)
-        footer_phone_patterns = [
-            r'(\+84|84|0)[\s\-]?[0-9]{1,4}[\s\-]?[0-9]{1,4}[\s\-]?[0-9]{1,4}',  # +84-xxx-xxx-xxx
-            r'(\+84|84|0)[0-9]{9,10}',  # +84xxxxxxxxx
-            r'0[0-9]{9,10}',            # 0xxxxxxxxx
-            r'[0-9]{7,15}',             # Generic fallback
-        ]
-        
-        for pattern in footer_phone_patterns:
-            matches = re.findall(pattern, html_content, re.IGNORECASE)
-            if isinstance(matches, list):
-                phones.extend(matches)
-            else:
-                phones.append(matches)
-        
-        # Clean and validate
-        cleaned_phones = []
-        for phone in phones:
-            if not phone:
-                continue
-            phone_str = str(phone).strip()
-            cleaned = re.sub(r'[\s\-\(\)\.]', '', phone_str)
-            if len(cleaned) >= 7 and len(cleaned) <= 15:
-                cleaned_phones.append(cleaned)
-        
-        return list(set(cleaned_phones))
+        soup = BeautifulSoup(html_content or "", "lxml")
+        footer = self.pick_footer_node(soup)
+        text = normalize_text(footer.get_text(" ", strip=True))
+        # tìm theo iterator để luôn lấy full match
+        cands = [m.group(0) for m in self.VN_PHONE_RX.finditer(text)]
+        out: list[str] = []
+        for c in cands:
+            n = clean_phone(c)
+            if n and n not in out:
+                out.append(n)
+        return out
 
-    async def _extract_emails_from_footer(self, html_content: str) -> List[str]:
+    def _extract_emails_from_footer(self, html_content: str) -> List[str]:
         """Extract emails specifically from footer content"""
         emails = []
         
@@ -230,6 +234,28 @@ class ContactExtractorService:
         emails.extend(matches)
         
         return list(set(emails))
+
+    def _extract_phones_from_text(self, text: str) -> list[str]:
+        text = normalize_text(text)
+        out = []
+        for m in self.VN_PHONE_RX.finditer(text):
+            n = clean_phone(m.group(0))
+            if n and n not in out:
+                out.append(n)
+        return out
+
+    def pick_footer_node(self, soup: BeautifulSoup):
+        node = soup.select_one("footer, [role=contentinfo], #footer, .footer, .site-footer, .main-footer, .bottom-footer")
+        if node:
+            return node
+        # fallback: phần tử có id/class chứa 'footer'
+        for el in soup.find_all(True):
+            ident = (el.get("id") or "") + " " + " ".join(el.get("class") or [])
+            if "footer" in ident.lower():
+                return el
+        # fallback cuối: block cuối trang
+        blocks = soup.select("footer, section, div")
+        return blocks[-1] if blocks else soup
 
     def _merge_contact_data_with_priority(self, priority_data: Dict, fallback_data: Dict) -> Dict:
         """Merge contact data with priority (footer data takes precedence)"""
@@ -245,7 +271,7 @@ class ContactExtractorService:
         
         return merged
     
-    async def _extract_basic_contact_data(self, result: Dict) -> Dict:
+    def _extract_basic_contact_data(self, result: Dict) -> Dict:
         """Extract basic contact data from crawl result"""
         contact_data = {
             'emails': [],
@@ -270,7 +296,7 @@ class ContactExtractorService:
         
         return contact_data
     
-    async def _extract_social_media_enhanced(self, result: Dict, base_url: str) -> List[str]:
+    def _extract_social_media_enhanced(self, result: Dict, base_url: str) -> List[str]:
         """Enhanced social media detection"""
         social_links = []
         html_content = result.get('html', '')
@@ -283,7 +309,7 @@ class ContactExtractorService:
                 if platform == 'facebook':
                     social_links.append(f"https://facebook.com/{match}")
                 elif platform == 'linkedin':
-                    social_links.append(f"https://linkedin.com/{match}")
+                    social_links.append(f"https://twitter.com/{match}")
                 elif platform == 'twitter':
                     social_links.append(f"https://twitter.com/{match}")
                 elif platform == 'instagram':
@@ -307,44 +333,29 @@ class ContactExtractorService:
         # Remove duplicates
         return list(set(social_links))
     
-    async def _extract_phone_numbers(self, result: Dict) -> List[str]:
+    async def _extract_phone_numbers(self, result: dict) -> list[str]:
         """Extract phone numbers from content with improved patterns"""
-        phones = []
-        html_content = result.get('html', '')
-        
-        # Extract phone numbers using patterns
-        for pattern in self.phone_patterns:
-            matches = re.findall(pattern, html_content, re.IGNORECASE)
-            if isinstance(matches, list):
-                phones.extend(matches)
-            else:
-                phones.append(matches)
-        
-        # Clean and normalize phone numbers
-        cleaned_phones = []
-        for phone in phones:
-            if not phone:
-                continue
-                
-            # Convert to string and clean
-            phone_str = str(phone).strip()
-            
-            # Remove common prefixes and clean
-            cleaned = re.sub(r'[\s\-\(\)\.]', '', phone_str)
-            
-            # Validate phone number length and format
-            if len(cleaned) >= 7 and len(cleaned) <= 15:  # Reasonable phone length
-                # Remove duplicate consecutive digits (likely false positives)
-                if not re.search(r'(\d)\1{5,}', cleaned):  # No more than 5 consecutive same digits
-                    cleaned_phones.append(cleaned)
-        
-        # Remove duplicates and sort by length (prefer shorter, cleaner numbers)
-        unique_phones = list(set(cleaned_phones))
-        unique_phones.sort(key=len)
-        
-        logger.info(f"📞 Found {len(phones)} raw phone matches, cleaned to {len(unique_phones)} valid phones")
-        
-        return unique_phones
+        html_content = result.get("html", "") or ""
+        soup = BeautifulSoup(html_content, "lxml")
+        text = normalize_text(soup.get_text(" ", strip=True))
+
+        # 1) VN ưu tiên
+        phones = [m.group(0) for m in self.VN_PHONE_RX.finditer(text)]
+
+        # 2) (tuỳ chọn) các pattern quốc tế khác → nhớ dùng (?: ) và finditer
+        # INTERNATIONAL_RX = re.compile(r"...")  # nếu cần
+        # phones += [m.group(0) for m in INTERNATIONAL_RX.finditer(text)]
+
+        # 3) Clean & unique
+        out: list[str] = []
+        for p in phones:
+            n = clean_phone(p)
+            if n and n not in out:
+                out.append(n)
+
+        out.sort(key=len)
+        logger.info("📞 Found %d raw matches, cleaned to %d phones", len(phones), len(out))
+        return out
     
     async def _detect_contact_forms(self, result: Dict) -> List[str]:
         """Detect contact form URLs"""

@@ -123,33 +123,41 @@ async def detect_career_pages_scrapy_main(request: CareerPagesRequest):
                 logger.warning(f"⚠️ Contact extraction failed: {contact_error}")
                 contact_info = None
 
-        # Step 2: Only crawl contact info if we found career pages
-        if result.get('success') and result.get('career_pages') and len(result['career_pages']) > 0:
-            logger.info(f"✅ Found {len(result['career_pages'])} career pages, now extracting contact info")
-            
-            # Extract contact info from career pages
-            try:
-                enhanced = await contact_service.extract_contact_info(
-                    url=request.url,
-                    include_social=True,
-                    include_emails=True,
-                    include_phones=True,
-                    max_depth=2,
-                )
-                contact_info = {
-                    "emails": enhanced.get("emails", []),
-                    "phones": enhanced.get("phones", []),
-                    "social_links": enhanced.get("social_links", []),
-                    "contact_forms": enhanced.get("contact_forms", []),
-                    "website": request.url,
-                }
-                logger.info(f"✅ Contact info extracted from career pages: {len(contact_info['emails'])} emails, {len(contact_info['phones'])} phones")
-            except Exception as enhance_error:
-                logger.warning(f"⚠️ Contact extraction from career pages failed: {enhance_error}")
+                    # Step 2: Only crawl contact info if we found career pages
+            if result.get('success') and result.get('career_pages') and len(result['career_pages']) > 0:
+                logger.info(f"✅ Found {len(result['career_pages'])} career pages → extracting contact info")
+                
+                # Extract contact info from homepage + career pages
+                unique_targets = [request.url]  # homepage trước
+                # cộng thêm tối đa 2 trang career cho chắc
+                unique_targets += result['career_pages'][:2]
+                seen = set()
+                merged = {"emails": [], "phones": [], "social_links": [], "contact_forms": []}
+
+                for u in unique_targets:
+                    if u in seen: 
+                        continue
+                    seen.add(u)
+                    try:
+                        data = await contact_service.extract_contact_info(
+                            url=u, include_social=True, include_emails=True, include_phones=True, max_depth=1
+                        )
+                        # merge (ưu tiên footer nếu có hàm ưu tiên)
+                        merged["emails"].extend(data.get("emails", []))
+                        merged["phones"].extend(data.get("phones", []))
+                        merged["social_links"].extend(data.get("social_links", []))
+                        merged["contact_forms"].extend(data.get("contact_forms", []))
+                    except Exception as e:
+                        logger.warning(f"⚠️ Contact extraction failed for {u}: {e}")
+
+                # dedupe
+                merged["emails"] = list(dict.fromkeys(merged["emails"]))
+                merged["phones"] = list(dict.fromkeys(merged["phones"]))
+                contact_info = {**merged, "website": request.url}
+                logger.info(f"✅ Contact info extracted from {len(unique_targets)} pages: {len(merged['emails'])} emails, {len(merged['phones'])} phones")
+            else:
+                logger.info(f"⚠️ No career pages found → skip contact extraction")
                 contact_info = None
-        else:
-            logger.info(f"⚠️ No career pages found, skipping contact extraction")
-            contact_info = None
         
         # Add contact info to response
         response_data = result.copy()

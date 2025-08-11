@@ -16,6 +16,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 
 from .api.routes import router
+from .api.debug_routes import router as debug_router
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -98,8 +99,9 @@ async def memory_monitoring_middleware(request: Request, call_next):
             gc.collect()
             log_memory_usage()
 
-# Include router with prefix
+# Include routers
 app.include_router(router, prefix="/api/v1")
+app.include_router(debug_router)  # Debug routes không cần prefix
 
 # No alias endpoint needed - all endpoints use /api/v1 prefix
 

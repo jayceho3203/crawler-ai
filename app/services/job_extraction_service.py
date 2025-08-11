@@ -662,8 +662,8 @@ class JobExtractionService:
                         'crawl_method': 'scrapy_optimized'
                     }
                 
-                # Extract job details from HTML
-                job_details = await self._extract_job_details_from_html(result, job_url)
+                            # Extract job details from HTML
+            job_details = self._extract_job_details_from_html(result, job_url)
             
             crawl_time = (time.time() - start_time) # Changed from datetime.now() to time.time()
             
@@ -712,7 +712,7 @@ class JobExtractionService:
         
         return False
     
-    async def _extract_job_details_from_html(self, result: Dict, job_url: str) -> Dict:
+    def _extract_job_details_from_html(self, result: Dict, job_url: str) -> Dict:
         """Extract job details from HTML content"""
         try:
             from bs4 import BeautifulSoup
@@ -775,7 +775,7 @@ class JobExtractionService:
             # If no job details found, try alternative extraction
             if not job_details['job_name'] and not job_details['job_description']:
                 logger.info(f"   🔄 No job details found, trying alternative extraction")
-                alternative_job = await self._extract_job_alternative_methods(soup, job_url)
+                alternative_job = self._extract_job_alternative_methods(soup, job_url)
                 if alternative_job:
                     job_details.update(alternative_job)
             
@@ -796,7 +796,7 @@ class JobExtractionService:
                 'benefits': ''
             }
     
-    async def _extract_job_alternative_methods(self, soup, job_url: str) -> Dict:
+    def _extract_job_alternative_methods(self, soup, job_url: str) -> Dict:
         """Alternative methods to extract job details when standard methods fail"""
         try:
             # Method 1: Look for any text that might be job-related
