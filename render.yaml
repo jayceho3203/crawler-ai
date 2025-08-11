@@ -7,7 +7,7 @@ services:
       pip install --upgrade pip
       pip install --no-cache-dir -r requirements.txt
       # Skip Playwright completely - use requests-only mode
-    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1 --loop asyncio --access-log false --log-level warning
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1 --loop asyncio --no-access-log --log-level warning
     envVars:
       - key: PYTHONUNBUFFERED
         value: "1"
