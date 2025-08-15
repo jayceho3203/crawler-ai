@@ -226,9 +226,26 @@ async def extract_jobs_from_page(url: str, max_jobs: int = 50) -> Dict:
                     if link['job_score'] >= 5:  # High score threshold
                         filtered_job_links.append(link)
                 
+                # Convert job_links to jobs format
+                jobs = []
+                for link in filtered_job_links[:max_jobs]:
+                    job = {
+                        'title': link.get('text', ''),
+                        'url': link.get('url', ''),
+                        'company': '',  # Will be filled later
+                        'location': '',
+                        'job_type': 'Full-time',
+                        'salary': '',
+                        'posted_date': '',
+                        'description': '',
+                        'job_score': link.get('job_score', 0)
+                    }
+                    jobs.append(job)
+                
                 result = {
                     'success': True,
-                    'total_jobs_found': len(filtered_job_links),
+                    'total_jobs_found': len(jobs),
+                    'jobs': jobs,
                     'job_links': filtered_job_links[:max_jobs],
                     'source_url': url,
                     'job_links_detected': len(job_links),
@@ -243,6 +260,7 @@ async def extract_jobs_from_page(url: str, max_jobs: int = 50) -> Dict:
             'success': False,
             'error': str(e),
             'total_jobs_found': 0,
+            'jobs': [],
             'job_links': [],
             'source_url': url,
             'job_links_detected': 0,

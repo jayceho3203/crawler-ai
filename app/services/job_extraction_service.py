@@ -170,7 +170,7 @@ class JobExtractionService:
         """Extract jobs from a single career page"""
         try:
             # Step 1: Basic job extraction
-            basic_result = extract_jobs_from_page(career_url, max_jobs)
+            basic_result = await extract_jobs_from_page(career_url, max_jobs)
             visible_jobs = basic_result.get('jobs', [])
             visible_jobs_count = len(visible_jobs)
             

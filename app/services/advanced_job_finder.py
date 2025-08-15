@@ -95,7 +95,7 @@ class AdvancedJobFinder:
         """Basic job extraction using existing service"""
         try:
             from .job_extractor import extract_jobs_from_page
-            result = extract_jobs_from_page(career_url, max_jobs)
+            result = await extract_jobs_from_page(career_url, max_jobs)
             if result.get('success'):
                 logger.info(f"   ✅ Basic extraction: {len(result.get('jobs', []))} jobs")
                 return result.get('jobs', [])
