@@ -178,6 +178,9 @@ async def detect_career_pages_scrapy_main(request: CareerPagesRequest):
         response_data['contact_info'] = contact_info
         response_data['has_contact_info'] = contact_info is not None
         
+        # Initialize phone field
+        response_data['phone'] = ""
+        
         # Merge Apify data with crawled contact info
         if contact_info and apify_data:
             # Add Apify phone if not already found
@@ -192,14 +195,29 @@ async def detect_career_pages_scrapy_main(request: CareerPagesRequest):
                 response_data['company_title'] = apify_data['title']
                 logger.info(f"🏢 Added Apify company title: {apify_data['title']}")
         
+        # Convert phone array to single string for n8n compatibility
+        if contact_info and contact_info.get('phones') and len(contact_info['phones']) > 0:
+            # Take the first phone number found
+            phone_string = contact_info['phones'][0]
+            response_data['phone'] = phone_string
+            logger.info(f"📱 Converted phone array to string: {phone_string}")
+        elif apify_data and apify_data.get('phone'):
+            # Use Apify phone if no phones found in contact_info
+            response_data['phone'] = apify_data['phone']
+            logger.info(f"📱 Using Apify phone: {apify_data['phone']}")
+        else:
+            # If no phones found anywhere, set empty string
+            response_data['phone'] = ""
+            logger.info(f"📱 No phones found, setting empty string")
+        
         # Add missing fields for n8n compatibility
         response_data['fit_markdown'] = None  # Placeholder for future implementation
         response_data['meta_description'] = None  # Placeholder for future implementation
         
-        # Add company title from Apify if available
-        if apify_data.get('title'):
-            response_data['company_title'] = apify_data['title']
-            logger.info(f"🏢 Added company title to response: {apify_data['title']}")
+        # Add company title from Apify if available (already set above, so skip duplicate)
+        # if apify_data.get('title'):
+        #     response_data['company_title'] = apify_data['title']
+        #     logger.info(f"🏢 Added company title to response: {apify_data['title']}")
         
         return CareerPagesResponse(**response_data)
         
@@ -211,7 +229,8 @@ async def detect_career_pages_scrapy_main(request: CareerPagesRequest):
             success=False,
             error_message=str(e),
             contact_info=None,
-            has_contact_info=False
+            has_contact_info=False,
+            phone=""  # Empty string for n8n compatibility
         )
 
 class JobUrlsRequest(BaseModel):
