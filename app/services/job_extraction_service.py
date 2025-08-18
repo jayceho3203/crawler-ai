@@ -179,11 +179,16 @@ class JobExtractionService:
             hidden_jobs_count = 0
             
             if include_hidden_jobs:
-                # Temporarily disable hidden job extraction to avoid page parameter issue
-                # hidden_result = await self.hidden_job_extractor.extract_hidden_jobs_from_page(career_url, page)
-                # hidden_jobs = hidden_result.get('jobs', [])
-                hidden_jobs = []
-                hidden_jobs_count = 0
+                # Enable hidden job extraction for better coverage
+                try:
+                    hidden_result = await self.extractor.extract_hidden_jobs_from_page(career_url)
+                    hidden_jobs = hidden_result.get('jobs', [])
+                    hidden_jobs_count = len(hidden_jobs)
+                    logger.info(f"   🔍 Found {hidden_jobs_count} hidden jobs")
+                except Exception as e:
+                    logger.warning(f"   ⚠️ Hidden job extraction failed: {e}")
+                    hidden_jobs = []
+                    hidden_jobs_count = 0
             
             # Step 3: Combine and deduplicate jobs
             all_jobs = visible_jobs + hidden_jobs

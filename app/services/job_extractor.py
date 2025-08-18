@@ -155,12 +155,78 @@ def calculate_job_link_score(url: str, link_text: str = "", element_attrs: Dict 
     
     return score, score_breakdown
 
+def extract_job_cards_from_html(soup: BeautifulSoup, base_url: str) -> List[Dict]:
+    """Extract job cards directly from HTML structure"""
+    job_cards = []
+    
+    try:
+        # Common job card selectors
+        job_card_selectors = [
+            'article',  # Common for job cards
+            '.job-card', '.jobcard', '.job-item', '.jobitem',
+            '.career-item', '.career-card', '.position-item',
+            '.vacancy-item', '.opportunity-item',
+            '[class*="job"]', '[class*="career"]', '[class*="position"]',
+            '[class*="vacancy"]', '[class*="opportunity"]'
+        ]
+        
+        for selector in job_card_selectors:
+            cards = soup.select(selector)
+            
+            for card in cards:
+                # Extract job title
+                title_selectors = ['h1', 'h2', 'h3', 'h4', '.title', '.job-title', '.position-title']
+                title = ""
+                for title_sel in title_selectors:
+                    title_elem = card.select_one(title_sel)
+                    if title_elem:
+                        title = title_elem.get_text(strip=True)
+                        break
+                
+                # Extract job link
+                link_elem = card.find('a', href=True)
+                job_url = ""
+                if link_elem:
+                    job_url = urljoin(base_url, link_elem.get('href'))
+                
+                # Extract job description
+                desc_selectors = ['.description', '.job-description', '.content', 'p']
+                description = ""
+                for desc_sel in desc_selectors:
+                    desc_elem = card.select_one(desc_sel)
+                    if desc_elem:
+                        description = desc_elem.get_text(strip=True)
+                        break
+                
+                # Only add if we have a title
+                if title:
+                    job_cards.append({
+                        'url': job_url,
+                        'text': title,
+                        'job_score': 10,  # High score for direct job cards
+                        'score_breakdown': {'direct_job_card': 10},
+                        'element_attrs': {},
+                        'description': description,
+                        'is_direct_card': True
+                    })
+        
+        logger.info(f"🔍 Found {len(job_cards)} job cards directly from HTML")
+        return job_cards
+        
+    except Exception as e:
+        logger.error(f"Error extracting job cards: {e}")
+        return []
+
 def extract_job_links_detailed(soup: BeautifulSoup, base_url: str) -> List[Dict]:
     """Extract job links with detailed analysis and scoring"""
     job_links = []
     
     try:
-        # Find all links
+        # Step 1: Extract job cards directly from HTML
+        job_cards = extract_job_cards_from_html(soup, base_url)
+        job_links.extend(job_cards)
+        
+        # Step 2: Find all links
         links = soup.find_all('a', href=True)
         
         for link in links:

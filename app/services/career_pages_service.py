@@ -292,8 +292,9 @@ class CareerPagesService:
             subdomain_urls = []
             for pattern in subdomain_patterns:
                 subdomain_urls.append(f"https://{pattern}.{domain}")
-                subdomain_urls.append(f"https://{pattern}.{domain}/career")
-                subdomain_urls.append(f"https://{pattern}.{domain}/jobs")
+                # Add common career page patterns
+                for career_pattern in ['/career', '/careers', '/jobs', '/tuyen-dung', '/viec-lam']:
+                    subdomain_urls.append(f"https://{pattern}.{domain}{career_pattern}")
             
             # Test subdomain URLs
             tasks = []
