@@ -167,31 +167,27 @@ class JobExtractionService:
     
     async def _extract_jobs_from_single_page(self, career_url: str, max_jobs: int,
                                            include_hidden_jobs: bool, include_job_details: bool) -> Dict:
-        """Extract jobs from a single career page"""
+        """Extract jobs from a single career page with pagination support"""
         try:
-            # Step 1: Basic job extraction
-            basic_result = await extract_jobs_from_page(career_url, max_jobs)
-            visible_jobs = basic_result.get('jobs', [])
-            visible_jobs_count = len(visible_jobs)
+            # Step 1: Get all job URLs including pagination
+            all_job_urls = await self._get_all_job_urls_with_pagination(career_url, max_jobs)
+            logger.info(f"   🔍 Found {len(all_job_urls)} total job URLs across all pages")
             
-            # Step 2: Hidden job extraction (if enabled)
-            hidden_jobs = []
-            hidden_jobs_count = 0
-            
-            if include_hidden_jobs:
-                # Enable hidden job extraction for better coverage
+            # Step 2: Extract job details from each URL
+            all_jobs = []
+            for job_url in all_job_urls:
                 try:
-                    hidden_result = await self.extractor.extract_hidden_jobs_from_page(career_url)
-                    hidden_jobs = hidden_result.get('jobs', [])
-                    hidden_jobs_count = len(hidden_jobs)
-                    logger.info(f"   🔍 Found {hidden_jobs_count} hidden jobs")
+                    job_detail = await self._extract_single_job_detail(job_url)
+                    if job_detail:
+                        all_jobs.append(job_detail)
                 except Exception as e:
-                    logger.warning(f"   ⚠️ Hidden job extraction failed: {e}")
-                    hidden_jobs = []
-                    hidden_jobs_count = 0
+                    logger.warning(f"   ⚠️ Failed to extract job from {job_url}: {e}")
+            
+            visible_jobs_count = len(all_jobs)
+            hidden_jobs_count = 0  # Hidden jobs are now included in the main extraction
             
             # Step 3: Combine and deduplicate jobs
-            all_jobs = visible_jobs + hidden_jobs
+            all_jobs = all_visible_jobs + all_hidden_jobs
             unique_jobs = self._deduplicate_jobs(all_jobs)
             
             # Step 4: Enhance job details (if enabled)
@@ -249,6 +245,125 @@ class JobExtractionService:
                            if self._matches_posted_date(job, posted_date_filter)]
         
         return filtered_jobs
+    
+    async def _detect_pagination_urls(self, career_url: str) -> List[str]:
+        """Detect pagination URLs from career page"""
+        pagination_urls = []
+        
+        try:
+            # Common pagination patterns
+            pagination_patterns = [
+                '?paged=', '?page=', '?p=', '?pg=',
+                '/page/', '/p/', '/pg/',
+                '&paged=', '&page=', '&p=', '&pg='
+            ]
+            
+            # Get the base URL and current page number
+            from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+            
+            parsed = urlparse(career_url)
+            query_params = parse_qs(parsed.query)
+            
+            # Check if current URL has pagination
+            current_page = 1
+            for pattern in pagination_patterns:
+                param_name = pattern.replace('?', '').replace('&', '').replace('=', '')
+                if param_name in query_params:
+                    try:
+                        current_page = int(query_params[param_name][0])
+                        break
+                    except (ValueError, IndexError):
+                        pass
+            
+            # Generate pagination URLs (try pages 2-10)
+            for page_num in range(2, 11):
+                # Try different pagination patterns
+                for pattern in pagination_patterns:
+                    param_name = pattern.replace('?', '').replace('&', '').replace('=', '')
+                    
+                    # Create new query params
+                    new_query_params = query_params.copy()
+                    new_query_params[param_name] = [str(page_num)]
+                    
+                    # Build new URL
+                    new_query = urlencode(new_query_params, doseq=True)
+                    new_url = urlunparse((
+                        parsed.scheme, parsed.netloc, parsed.path,
+                        parsed.params, new_query, parsed.fragment
+                    ))
+                    
+                    pagination_urls.append(new_url)
+                    break  # Use first pattern that works
+            
+            logger.info(f"   📄 Generated {len(pagination_urls)} pagination URLs")
+            return pagination_urls
+            
+        except Exception as e:
+            logger.warning(f"   ⚠️ Pagination detection failed: {e}")
+            return []
+    
+    async def _get_all_job_urls_with_pagination(self, career_url: str, max_jobs: int) -> List[str]:
+        """Get all job URLs from career page including pagination"""
+        all_job_urls = []
+        visited_urls = set()
+        
+        try:
+            # Start with the main career page
+            urls_to_crawl = [career_url]
+            
+            while urls_to_crawl and len(all_job_urls) < max_jobs:
+                current_url = urls_to_crawl.pop(0)
+                
+                if current_url in visited_urls:
+                    continue
+                    
+                visited_urls.add(current_url)
+                logger.info(f"   🔍 Crawling: {current_url}")
+                
+                # Extract job URLs from current page
+                try:
+                    result = await extract_jobs_from_page(current_url, max_jobs)
+                    page_job_urls = result.get('job_urls', [])
+                    
+                    # Add job URLs (filter out pagination URLs)
+                    for job_url in page_job_urls:
+                        if self._is_job_url(job_url) and job_url not in all_job_urls:
+                            all_job_urls.append(job_url)
+                    
+                    # Add pagination URLs to crawl queue
+                    for url in page_job_urls:
+                        if self._is_pagination_url(url) and url not in visited_urls:
+                            urls_to_crawl.append(url)
+                            
+                except Exception as e:
+                    logger.warning(f"   ⚠️ Failed to crawl {current_url}: {e}")
+            
+            logger.info(f"   📄 Total job URLs found: {len(all_job_urls)}")
+            return all_job_urls
+            
+        except Exception as e:
+            logger.error(f"   ❌ Error in pagination crawl: {e}")
+            return all_job_urls
+    
+    def _is_job_url(self, url: str) -> bool:
+        """Check if URL is a job detail page"""
+        job_indicators = ['/career/', '/job/', '/position/', '/vacancy/']
+        return any(indicator in url.lower() for indicator in job_indicators)
+    
+    def _is_pagination_url(self, url: str) -> bool:
+        """Check if URL is a pagination page"""
+        pagination_indicators = ['?paged=', '?page=', '?p=', '/page/']
+        return any(indicator in url.lower() for indicator in pagination_indicators)
+    
+    async def _extract_single_job_detail(self, job_url: str) -> Optional[Dict]:
+        """Extract details from a single job URL"""
+        try:
+            # Use the existing job detail extraction logic
+            from .job_extractor import extract_job_details_from_url
+            return await extract_job_details_from_url(job_url)
+        except Exception as e:
+            logger.warning(f"   ⚠️ Failed to extract job details from {job_url}: {e}")
+            return None
     
     def _matches_job_type(self, job: Dict, job_types_filter: List[str]) -> bool:
         """Check if job matches the job type filter"""
