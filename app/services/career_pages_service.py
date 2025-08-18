@@ -32,7 +32,7 @@ class CareerPagesService:
         ]
     
     async def detect_career_pages(self, url: str, include_subdomain_search: bool = False,
-                                max_pages_to_scan: int = 100, strict_filtering: bool = True,
+                                max_pages_to_scan: int = 100, strict_filtering: bool = False,  # Default to False
                                 include_job_boards: bool = False, use_scrapy: bool = True) -> Dict:
         """
         Detect career pages with enhanced capabilities
@@ -113,10 +113,10 @@ class CareerPagesService:
                     # Check if this page has high confidence in analysis
                     page_analysis = next((a for a in career_page_analysis if a['url'] == page), None)
                     
-                    if page_analysis and page_analysis.get('confidence', 0) >= 0.8:
-                        # High confidence career pages should always pass strict validation
+                    if page_analysis and page_analysis.get('confidence', 0) >= 0.5:  # Giảm từ 0.8 xuống 0.5
+                        # Medium confidence career pages should pass validation
                         filtered_career_pages.append(page)
-                        logger.info(f"✅ High confidence career page passed strict validation: {page} (score: {page_analysis['confidence']})")
+                        logger.info(f"✅ Career page passed validation: {page} (score: {page_analysis['confidence']})")
                     else:
                         # Apply strict validation only for lower confidence pages
                         validation = filter_career_urls([page])
@@ -185,25 +185,25 @@ class CareerPagesService:
             career_indicators = []
             
             # 1. Exact career keywords (HIGHEST WEIGHT)
-            exact_career_keywords = ['career', 'careers', 'jobs', 'employment', 'tuyen-dung', 'viec-lam']
+            exact_career_keywords = ['career', 'careers', 'jobs', 'employment', 'tuyen-dung', 'viec-lam', 'co-hoi-nghe-nghiep', 'tuyen-nhan-vien']
             for keyword in exact_career_keywords:
                 if keyword in path:
                     career_indicators.append(f"Exact career keyword: '{keyword}'")
                     analysis['confidence'] += 1.0  # Tăng từ 0.6 lên 1.0
             
-            # 2. Generic keywords (LOWER WEIGHT)
-            generic_keywords = ['dev', 'software', 'tech', 'ml', 'ai', 'testing']
+            # 2. Generic keywords (MEDIUM WEIGHT) - Tăng weight để dễ đạt 0.5
+            generic_keywords = ['dev', 'software', 'tech', 'ml', 'ai', 'testing', 'it', 'digital']
             for keyword in generic_keywords:
                 if keyword in path:
                     career_indicators.append(f"Path contains '{keyword}'")
-                    analysis['confidence'] += 0.1  # Giảm từ 0.2 xuống 0.1
+                    analysis['confidence'] += 0.3  # Tăng từ 0.1 lên 0.3
             
-            # 3. Career patterns (HIGH WEIGHT) - EASIER TO REACH 0.8
-            career_patterns = ['/career', '/careers', '/jobs', '/employment', '/tuyen-dung', '/viec-lam']
+            # 3. Career patterns (HIGH WEIGHT) - EASIER TO REACH 0.5
+            career_patterns = ['/career', '/careers', '/jobs', '/employment', '/tuyen-dung', '/viec-lam', '/co-hoi-nghe-nghiep', '/tuyen-nhan-vien']
             for pattern in career_patterns:
                 if pattern in path:
                     career_indicators.append(f"Career pattern: {pattern}")
-                    analysis['confidence'] += 0.9  # Tăng từ 0.8 lên 0.9
+                    analysis['confidence'] += 0.8  # Giữ nguyên 0.8
             
             # 4. Domain keywords (LOW WEIGHT)
             for keyword in self.career_keywords:

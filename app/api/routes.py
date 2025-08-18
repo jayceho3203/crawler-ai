@@ -15,6 +15,7 @@ from ..models.schemas import (
     CrawlRequest, CrawlResponse, BatchCrawlRequest, BatchCrawlResponse,
     JobDetailRequest, ChildLinksRequest, AIExtractionRequest,
     ContactInfoRequest, ContactInfoResponse, CareerPagesRequest, CareerPagesResponse,
+    BatchCareerPagesRequest, BatchCareerPagesResponse,
     JobExtractionRequest, JobExtractionResponse, AdvancedJobFindingRequest, AdvancedJobFindingResponse
 )
 from ..services.crawler import crawl_single_url
@@ -344,6 +345,86 @@ async def ai_agent_analysis(request: AIAgentRequest):
 async def health_check():
     """Health check endpoint"""
     return {"status": "healthy", "timestamp": datetime.now().isoformat()}
+
+@router.post("/debug_html")
+async def debug_html(request: JobDetailsRequest):
+    """Debug endpoint to check HTML content"""
+    try:
+        job_url = request.url
+        logger.info(f"🔍 Debug HTML for: {job_url}")
+        
+        # Crawl the URL
+        from ..services.crawler import crawl_single_url
+        result = await crawl_single_url(job_url)
+        
+        html_content = result.get('html', '')
+        
+        return {
+            'success': result.get('success', False),
+            'url': job_url,
+            'html_length': len(html_content),
+            'html_preview': html_content[:1000] if html_content else "No HTML content",
+            'status_code': result.get('status_code', 0),
+            'error': result.get('error_message', None)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in debug HTML endpoint: {e}")
+        return {
+            'success': False,
+            'error_message': str(e)
+        }
+
+@router.post("/batch_detect_career_pages")
+async def batch_detect_career_pages(request: BatchCareerPagesRequest):
+    """Batch detect career pages from multiple URLs"""
+    try:
+        urls = request.urls
+        logger.info(f"🚀 Batch career page detection for {len(urls)} URLs")
+        
+        results = []
+        for url in urls:
+            try:
+                # Detect career pages for each URL
+                result = await career_pages_service.detect_career_pages(
+                    url=url,
+                    include_subdomain_search=request.include_subdomain_search,
+                    max_pages_to_scan=request.max_pages_to_scan,
+                    strict_filtering=request.strict_filtering,
+                    include_job_boards=request.include_job_boards,
+                    use_scrapy=request.use_scrapy
+                )
+                
+                results.append({
+                    'url': url,
+                    'result': result
+                })
+                
+                logger.info(f"✅ Completed career page detection for: {url}")
+                
+            except Exception as e:
+                logger.error(f"❌ Error detecting career pages for {url}: {e}")
+                results.append({
+                    'url': url,
+                    'result': {
+                        'success': False,
+                        'error_message': str(e)
+                    }
+                })
+        
+        return {
+            'success': True,
+            'total_urls': len(urls),
+            'completed_urls': len([r for r in results if r['result'].get('success', False)]),
+            'results': results
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in batch career page detection: {e}")
+        return {
+            'success': False,
+            'error_message': str(e)
+        }
 
 @router.post("/clear-cache")
 async def clear_cache():

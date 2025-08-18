@@ -109,6 +109,23 @@ class CareerPagesResponse(BaseModel):
     # Additional company info from Apify
     company_title: Optional[str] = None
 
+class BatchCareerPagesRequest(BaseModel):
+    """Request model for batch career page detection"""
+    urls: List[str]
+    include_subdomain_search: bool = False
+    max_pages_to_scan: int = 30
+    strict_filtering: bool = False
+    include_job_boards: bool = False
+    use_scrapy: bool = True
+
+class BatchCareerPagesResponse(BaseModel):
+    """Response model for batch career page detection"""
+    success: bool
+    error_message: Optional[str] = None
+    total_urls: int = 0
+    completed_urls: int = 0
+    results: List[Dict] = []
+
 class JobExtractionRequest(BaseModel):
     """Request model for job extraction"""
     career_page_urls: List[str]

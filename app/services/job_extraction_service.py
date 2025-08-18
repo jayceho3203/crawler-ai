@@ -186,8 +186,7 @@ class JobExtractionService:
             visible_jobs_count = len(all_jobs)
             hidden_jobs_count = 0  # Hidden jobs are now included in the main extraction
             
-            # Step 3: Combine and deduplicate jobs
-            all_jobs = all_visible_jobs + all_hidden_jobs
+            # Step 3: Deduplicate jobs
             unique_jobs = self._deduplicate_jobs(all_jobs)
             
             # Step 4: Enhance job details (if enabled)
@@ -852,11 +851,13 @@ class JobExtractionService:
                 'job_link': job_url    # Job Link (thay vì url)
             }
             
-            # Enhanced title extraction
+            # Enhanced title extraction for Cole.vn and similar sites
             title_selectors = [
                 'h1', 'h2', 'h3', '.job-title', '.position-title', '.title',
                 '.career-title', '.vacancy-title', '.opening-title',
-                '[data-job-title]', '[data-position-title]'
+                '[data-job-title]', '[data-position-title]',
+                '.entry-title', '.post-title', '.page-title',
+                'h1.entry-title', 'h1.post-title', 'h1.page-title'
             ]
             for selector in title_selectors:
                 title_element = soup.select_one(selector)
@@ -865,13 +866,25 @@ class JobExtractionService:
                     if title_text and len(title_text) > 3:
                         job_details['job_name'] = title_text
                         job_details['job_role'] = title_text  # Set job_role same as job_name
+                        logger.info(f"   📄 Found job title: {title_text}")
                         break
             
-            # Enhanced description extraction
+            # Enhanced description extraction for Cole.vn and similar sites
             desc_selectors = [
                 '.job-description', '.description', '.content', '.job-content',
                 '.position-description', '.career-description', '.vacancy-description',
-                'article', '.main-content', '.job-details', '.position-details'
+                'article', '.main-content', '.job-details', '.position-details',
+                '.entry-content', '.post-content', '.page-content',
+                '.job-body', '.position-body', '.career-body',
+                '.job-info', '.position-info', '.career-info',
+                # CO-WELL specific selectors
+                '.job-detail', '.position-detail', '.career-detail',
+                '.job-requirements', '.position-requirements', '.career-requirements',
+                '.job-benefits', '.position-benefits', '.career-benefits',
+                '.job-responsibilities', '.position-responsibilities', '.career-responsibilities',
+                # Generic content selectors
+                '.content-area', '.main', '#main', '.container', '.wrapper',
+                '.text-content', '.body-content', '.page-body'
             ]
             for selector in desc_selectors:
                 desc_element = soup.select_one(selector)
@@ -879,7 +892,12 @@ class JobExtractionService:
                     desc_text = desc_element.get_text().strip()
                     if desc_text and len(desc_text) > 50:
                         job_details['job_description'] = desc_text[:2000]
+                        logger.info(f"   📄 Found job description with selector '{selector}' (length: {len(desc_text)})")
                         break
+                    else:
+                        logger.info(f"   🔍 Found element with selector '{selector}' but text too short: {len(desc_text)} chars")
+                else:
+                    logger.debug(f"   🔍 Selector '{selector}' not found")
             
             # Company info is already in Wehappi company details, so we skip it here
             
@@ -895,12 +913,27 @@ class JobExtractionService:
             logger.info(f"   📄 Job Description: {bool(job_details['job_description'])}")
             logger.info(f"   📄 Job Link (url): {bool(job_details['job_link'])}")
             
+            # Debug HTML content
+            html_content = result.get('html', '')
+            logger.info(f"   📄 HTML content length: {len(html_content)}")
+            if html_content:
+                logger.info(f"   📄 HTML preview: {html_content[:500]}...")
+            else:
+                logger.warning(f"   ⚠️ No HTML content found!")
+            
             # If no job details found, try alternative extraction
             if not job_details['job_name'] and not job_details['job_description']:
                 logger.info(f"   🔄 No job details found, trying alternative extraction")
                 alternative_job = self._extract_job_alternative_methods(soup, job_url)
                 if alternative_job:
                     job_details.update(alternative_job)
+            
+            # If still no job details, try extracting from main content area
+            if not job_details['job_name'] and not job_details['job_description']:
+                logger.info(f"   🔄 Trying main content extraction")
+                main_content_job = self._extract_job_from_main_content(soup, job_url)
+                if main_content_job:
+                    job_details.update(main_content_job)
             
             return job_details
             
@@ -918,6 +951,121 @@ class JobExtractionService:
                 'requirements': '',
                 'benefits': ''
             }
+    
+    def _extract_job_from_main_content(self, soup, job_url: str) -> Dict:
+        """Extract job details from main content area when standard selectors fail"""
+        try:
+            job_details = {}
+            
+            # Try to find main content area
+            main_content_selectors = [
+                'main', '.main', '#main', '.content', '#content',
+                '.container', '.wrapper', '.page-content', '.post-content'
+            ]
+            
+            main_content = None
+            for selector in main_content_selectors:
+                main_content = soup.select_one(selector)
+                if main_content:
+                    break
+            
+            if not main_content:
+                # If no main content found, use body
+                main_content = soup.find('body')
+            
+            if main_content:
+                # Extract all text from main content
+                content_text = main_content.get_text(separator=' ', strip=True)
+                
+                # Find job title from URL or content
+                job_title = self._extract_job_title_from_url_or_content(job_url, content_text)
+                if job_title:
+                    job_details['job_name'] = job_title
+                    job_details['job_role'] = job_title
+                
+                # Extract job description from content
+                job_description = self._extract_job_description_from_content(content_text)
+                if job_description:
+                    job_details['job_description'] = job_description
+                
+                logger.info(f"   📄 Main content extraction: title={bool(job_details.get('job_name'))}, desc={bool(job_details.get('job_description'))}")
+            
+            return job_details
+            
+        except Exception as e:
+            logger.error(f"Error in main content extraction: {e}")
+            return {}
+    
+    def _extract_job_title_from_url_or_content(self, job_url: str, content_text: str) -> str:
+        """Extract job title from URL or content"""
+        try:
+            # Try to extract from URL first
+            from urllib.parse import urlparse, unquote
+            parsed = urlparse(job_url)
+            path = unquote(parsed.path)
+            
+            # Extract title from URL path
+            if '/tuyen-dung/' in path:
+                # For Cole.vn format: /tuyen-dung/hn---tro-giang-python-for-data-analysis
+                title_part = path.split('/tuyen-dung/')[-1]
+                if title_part:
+                    # Clean up the title
+                    title = title_part.replace('-', ' ').replace('_', ' ')
+                    # Capitalize words
+                    title = ' '.join(word.capitalize() for word in title.split())
+                    return title
+            
+            # If no title from URL, try to find in content
+            import re
+            # Look for patterns like [HN] - Job Title or similar
+            title_patterns = [
+                r'\[([^\]]+)\]\s*-\s*([^\[\]]+)',  # [HN] - Job Title
+                r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+){2,})',  # Multiple capitalized words
+                r'(Senior|Junior|Lead|Manager|Developer|Engineer|Designer|Analyst|Trợ giảng|Chuyên viên)\s+[A-Za-zÀ-ỹ]+'
+            ]
+            
+            for pattern in title_patterns:
+                matches = re.findall(pattern, content_text[:1000])  # Search in first 1000 chars
+                if matches:
+                    if isinstance(matches[0], tuple):
+                        return ' '.join(matches[0])
+                    else:
+                        return matches[0]
+            
+            return ""
+            
+        except Exception as e:
+            logger.error(f"Error extracting job title: {e}")
+            return ""
+    
+    def _extract_job_description_from_content(self, content_text: str) -> str:
+        """Extract job description from content text"""
+        try:
+            # Look for job description sections
+            desc_keywords = [
+                'mô tả công việc', 'job description', 'mô tả', 'description',
+                'yêu cầu', 'requirements', 'quyền lợi', 'benefits',
+                'phạm vi', 'scope', 'hình thức', 'form'
+            ]
+            
+            # Find the start of job description
+            start_pos = -1
+            for keyword in desc_keywords:
+                pos = content_text.lower().find(keyword.lower())
+                if pos != -1 and (start_pos == -1 or pos < start_pos):
+                    start_pos = pos
+            
+            if start_pos != -1:
+                # Extract description from start_pos to end or next section
+                description = content_text[start_pos:start_pos + 2000]  # Limit to 2000 chars
+                return description.strip()
+            
+            # If no keywords found, take first 1000 characters as description
+            return content_text[:1000].strip()
+            
+        except Exception as e:
+            logger.error(f"Error extracting job description: {e}")
+            return ""
     
     def _extract_job_alternative_methods(self, soup, job_url: str) -> Dict:
         """Alternative methods to extract job details when standard methods fail"""
