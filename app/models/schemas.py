@@ -108,8 +108,6 @@ class CareerPagesResponse(BaseModel):
     has_contact_info: bool = False
     # Additional company info from Apify
     company_title: Optional[str] = None
-    # Phone number as string for n8n compatibility
-    phone: Optional[str] = None
 
 class JobExtractionRequest(BaseModel):
     """Request model for job extraction"""
