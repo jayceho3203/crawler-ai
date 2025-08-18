@@ -13,6 +13,190 @@ import asyncio
 
 logger = logging.getLogger(__name__)
 
+async def extract_job_details_from_url(job_url: str) -> Optional[Dict]:
+    """Extract job details from a single job URL using Playwright for JavaScript rendering"""
+    try:
+        logger.info(f"   🔍 Extracting job details from: {job_url}")
+        
+        # Try Playwright first for JavaScript rendering
+        try:
+            from playwright.async_api import async_playwright
+            
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(headless=True)
+                page = await browser.new_page()
+                
+                # Set user agent to avoid detection
+                await page.set_extra_http_headers({
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                })
+                
+                # Navigate to the page and wait for content to load
+                await page.goto(job_url, wait_until='networkidle', timeout=30000)
+                
+                # Wait a bit more for dynamic content
+                await page.wait_for_timeout(3000)
+                
+                # Extract job details using JavaScript
+                job_details = await page.evaluate("""
+                    () => {
+                        const details = {};
+                        
+                        // Extract job title
+                        const titleSelectors = [
+                            'h1', 'h2', '.job-title', '.position-title', '.career-title',
+                            '.entry-title', '.post-title', '.page-title',
+                            '[data-job-title]', '[data-position-title]'
+                        ];
+                        
+                        for (const selector of titleSelectors) {
+                            const element = document.querySelector(selector);
+                            if (element && element.textContent.trim()) {
+                                details.job_name = element.textContent.trim();
+                                break;
+                            }
+                        }
+                        
+                        // Extract job description
+                        const descSelectors = [
+                            '.job-description', '.description', '.content', '.job-content',
+                            '.position-description', '.career-description',
+                            'article', '.main-content', '.job-details',
+                            '.entry-content', '.post-content', '.page-content',
+                            '.job-body', '.position-body', '.career-body'
+                        ];
+                        
+                        for (const selector of descSelectors) {
+                            const element = document.querySelector(selector);
+                            if (element && element.textContent.trim()) {
+                                details.job_description = element.textContent.trim();
+                                break;
+                            }
+                        }
+                        
+                        // Extract job type
+                        const typeSelectors = [
+                            '.job-type', '.position-type', '.career-type',
+                            '[data-job-type]', '[data-position-type]'
+                        ];
+                        
+                        for (const selector of typeSelectors) {
+                            const element = document.querySelector(selector);
+                            if (element && element.textContent.trim()) {
+                                details.job_type = element.textContent.trim();
+                                break;
+                            }
+                        }
+                        
+                        // Extract location
+                        const locationSelectors = [
+                            '.job-location', '.position-location', '.career-location',
+                            '.location', '[data-location]'
+                        ];
+                        
+                        for (const selector of locationSelectors) {
+                            const element = document.querySelector(selector);
+                            if (element && element.textContent.trim()) {
+                                details.location = element.textContent.trim();
+                                break;
+                            }
+                        }
+                        
+                        // Extract salary
+                        const salarySelectors = [
+                            '.job-salary', '.position-salary', '.career-salary',
+                            '.salary', '[data-salary]'
+                        ];
+                        
+                        for (const selector of salarySelectors) {
+                            const element = document.querySelector(selector);
+                            if (element && element.textContent.trim()) {
+                                details.salary = element.textContent.trim();
+                                break;
+                            }
+                        }
+                        
+                        return details;
+                    }
+                """)
+                
+                await browser.close()
+                
+                # Add default values
+                job_details['job_url'] = job_url
+                job_details['job_name'] = job_details.get('job_name', '')
+                job_details['job_description'] = job_details.get('job_description', '')
+                job_details['job_type'] = job_details.get('job_type', 'Full-time')
+                job_details['job_role'] = job_details.get('job_name', '')  # Use job name as role
+                job_details['location'] = job_details.get('location', '')
+                job_details['salary'] = job_details.get('salary', '')
+                job_details['job_link'] = job_url
+                
+                logger.info(f"   ✅ Extracted job details: {job_details.get('job_name', 'No title')}")
+                return job_details
+                
+        except ImportError:
+            logger.warning("   ⚠️ Playwright not available, falling back to requests")
+            return await extract_job_details_from_url_requests(job_url)
+            
+    except Exception as e:
+        logger.error(f"   ❌ Error extracting job details from {job_url}: {e}")
+        return None
+
+async def extract_job_details_from_url_requests(job_url: str) -> Optional[Dict]:
+    """Fallback method using requests for job details extraction"""
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(job_url) as response:
+                if response.status == 200:
+                    html_content = await response.text()
+                    
+                    # Parse HTML with BeautifulSoup
+                    soup = BeautifulSoup(html_content, 'html.parser')
+                    
+                    job_details = {
+                        'job_url': job_url,
+                        'job_name': '',
+                        'job_description': '',
+                        'job_type': 'Full-time',
+                        'job_role': '',
+                        'location': '',
+                        'salary': '',
+                        'job_link': job_url
+                    }
+                    
+                    # Extract job title
+                    title_selectors = [
+                        'h1', 'h2', '.job-title', '.position-title', '.career-title',
+                        '.entry-title', '.post-title', '.page-title'
+                    ]
+                    
+                    for selector in title_selectors:
+                        element = soup.select_one(selector)
+                        if element and element.get_text().strip():
+                            job_details['job_name'] = element.get_text().strip()
+                            job_details['job_role'] = element.get_text().strip()
+                            break
+                    
+                    # Extract job description
+                    desc_selectors = [
+                        '.job-description', '.description', '.content', '.job-content',
+                        '.position-description', '.career-description',
+                        'article', '.main-content', '.job-details'
+                    ]
+                    
+                    for selector in desc_selectors:
+                        element = soup.select_one(selector)
+                        if element and element.get_text().strip():
+                            job_details['job_description'] = element.get_text().strip()
+                            break
+                    
+                    return job_details
+                    
+    except Exception as e:
+        logger.error(f"Error in requests fallback: {e}")
+        return None
+
 def get_domain(url: str) -> str:
     """Extract domain from URL"""
     return urlparse(url).netloc.lower()

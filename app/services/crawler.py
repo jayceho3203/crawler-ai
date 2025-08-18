@@ -7,6 +7,7 @@ Requests-only mode for Render free tier compatibility
 import time
 import re
 import logging
+import random
 from typing import Dict, List
 from urllib.parse import urljoin
 from bs4 import BeautifulSoup
@@ -24,69 +25,138 @@ logger = logging.getLogger(__name__)
 OPTIMIZED_TIMEOUT = 30000  # 30 seconds for requests
 PAGE_WAIT_TIMEOUT = 100  # 100ms for memory optimization
 
+# Enhanced anti-bot protection
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/115.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 13_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.4 Safari/605.1.15",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Edge/124.0.0.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.4 Safari/605.1.15",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
+]
+
+# Proxy list (free proxies - can be enhanced with paid proxies)
+PROXY_LIST = [
+    None,  # Direct connection
+    # Add proxy URLs here if available
+    # "http://proxy1:port",
+    # "http://proxy2:port",
+]
+
+def get_random_delay():
+    """Get random delay between requests to avoid rate limiting"""
+    return random.uniform(1.0, 3.0)
+
+def get_enhanced_headers(url: str):
+    """Get enhanced headers with anti-bot protection"""
+    user_agent = random.choice(USER_AGENTS)
+    
+    # Randomize Accept-Language
+    languages = [
+        'vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7',
+        'en-US,en;q=0.9,vi;q=0.8',
+        'vi,en-US;q=0.9,en;q=0.8',
+        'en-GB,en;q=0.9,vi;q=0.8'
+    ]
+    
+    return {
+        'User-Agent': user_agent,
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+        'Accept-Language': random.choice(languages),
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Accept-Charset': 'utf-8, iso-8859-1;q=0.5',
+        'Referer': url,
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache',
+        'DNT': '1',
+        'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Sec-Fetch-User': '?1',
+        'Connection': 'keep-alive',
+        'X-Requested-With': 'XMLHttpRequest',
+        **DEFAULT_HEADERS
+    }
+
 async def extract_with_requests(url: str) -> Dict:
     """Primary method using aiohttp with enhanced filtering and anti-bot headers"""
     start_time = time.time()
     
     try:
-        # Random User-Agent để giảm 403
-        import random
-        user_agents = [
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36",
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 13_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.4 Safari/605.1.15",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/115.0",
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        ]
+        # Add random delay to avoid rate limiting
+        delay = get_random_delay()
+        await asyncio.sleep(delay)
         
-        headers = {
-            'User-Agent': random.choice(user_agents),
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-            'Accept-Language': 'vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'Referer': url,
-            'Cache-Control': 'no-cache',
-            'Pragma': 'no-cache',
-            'DNT': '1',
-            'Upgrade-Insecure-Requests': '1',
-            **DEFAULT_HEADERS
-        }
-        
-        # Create SSL context that ignores certificate verification
-        import ssl
-        ssl_context = ssl.create_default_context()
-        ssl_context.check_hostname = False
-        ssl_context.verify_mode = ssl.CERT_NONE
-        
-        connector = aiohttp.TCPConnector(ssl=ssl_context)
-        
-        # Retry mechanism để giảm 403
-        max_retries = 3
+        # Enhanced retry mechanism với exponential backoff
+        max_retries = 5
         html_content = None
         response = None
         
         for attempt in range(max_retries):
             try:
+                # Get fresh headers for each attempt
+                headers = get_enhanced_headers(url)
+                
+                # Create SSL context that ignores certificate verification
+                import ssl
+                ssl_context = ssl.create_default_context()
+                ssl_context.check_hostname = False
+                ssl_context.verify_mode = ssl.CERT_NONE
+                
+                connector = aiohttp.TCPConnector(ssl=ssl_context)
+                
+                # Add timeout with exponential backoff
+                timeout = aiohttp.ClientTimeout(total=30 + (attempt * 10))
+                
                 async with aiohttp.ClientSession(connector=connector) as session:
-                    async with session.get(url, headers=headers, timeout=40, allow_redirects=True) as response:
-                        if response.status == 403 and attempt < max_retries - 1:
-                            logger.warning(f"⚠️ 403 Forbidden for {url}, retrying... (attempt {attempt + 1}/{max_retries})")
-                            # Thay đổi User-Agent cho lần retry
-                            headers['User-Agent'] = random.choice(user_agents)
-                            await asyncio.sleep(1)  # Delay 1s trước khi retry
-                            continue
+                    async with session.get(url, headers=headers, timeout=timeout, allow_redirects=True) as response:
+                        
+                        # Handle different error status codes
+                        if response.status == 403:
+                            if attempt < max_retries - 1:
+                                logger.warning(f"⚠️ 403 Forbidden for {url}, retrying... (attempt {attempt + 1}/{max_retries})")
+                                await asyncio.sleep(2 ** attempt)  # Exponential backoff
+                                continue
+                            else:
+                                raise Exception(f"403 Forbidden after {max_retries} attempts")
+                        
+                        elif response.status == 429:  # Rate limited
+                            if attempt < max_retries - 1:
+                                logger.warning(f"⚠️ 429 Rate Limited for {url}, waiting longer... (attempt {attempt + 1}/{max_retries})")
+                                await asyncio.sleep(5 + (attempt * 5))  # Longer delay for rate limiting
+                                continue
+                            else:
+                                raise Exception(f"429 Rate Limited after {max_retries} attempts")
+                        
+                        elif response.status == 503:  # Service unavailable
+                            if attempt < max_retries - 1:
+                                logger.warning(f"⚠️ 503 Service Unavailable for {url}, retrying... (attempt {attempt + 1}/{max_retries})")
+                                await asyncio.sleep(3 + (attempt * 2))
+                                continue
+                            else:
+                                raise Exception(f"503 Service Unavailable after {max_retries} attempts")
                         
                         response.raise_for_status()
                         html_content = await response.text()
                         break  # Thành công, thoát loop
                         
             except aiohttp.ClientResponseError as e:
-                if e.status == 403 and attempt < max_retries - 1:
-                    logger.warning(f"⚠️ 403 Forbidden for {url}, retrying... (attempt {attempt + 1}/{max_retries})")
-                    headers['User-Agent'] = random.choice(user_agents)
-                    await asyncio.sleep(1)
+                if e.status in [403, 429, 503] and attempt < max_retries - 1:
+                    logger.warning(f"⚠️ HTTP {e.status} for {url}, retrying... (attempt {attempt + 1}/{max_retries})")
+                    await asyncio.sleep(2 ** attempt)
                     continue
                 else:
                     raise e
+            except asyncio.TimeoutError:
+                if attempt < max_retries - 1:
+                    logger.warning(f"⚠️ Timeout for {url}, retrying... (attempt {attempt + 1}/{max_retries})")
+                    await asyncio.sleep(2 ** attempt)
+                    continue
+                else:
+                    raise Exception(f"Timeout after {max_retries} attempts")
         
         if html_content is None:
             raise Exception("Failed to get HTML content after all retries")

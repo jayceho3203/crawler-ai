@@ -1488,6 +1488,17 @@ class JobExtractionService:
                     'has_individual_urls': False
                 }
             
+            # Method 4: Try to extract from API endpoints
+            api_jobs = await self._extract_jobs_from_api_endpoints(career_page_url)
+            if api_jobs:
+                logger.info(f"   ✅ API extraction found {len(api_jobs)} jobs")
+                return {
+                    'success': True,
+                    'jobs': api_jobs,
+                    'extraction_type': 'api_based',
+                    'has_individual_urls': False
+                }
+            
             logger.warning(f"   ❌ All alternative methods failed")
             return {
                 'success': False,
@@ -1505,6 +1516,179 @@ class JobExtractionService:
                 'extraction_type': 'error',
                 'has_individual_urls': False
             }
+    
+    async def _extract_jobs_from_api_endpoints(self, career_page_url: str) -> List[Dict]:
+        """Extract jobs from API endpoints found in the page"""
+        try:
+            logger.info(f"   🔍 Trying API extraction for: {career_page_url}")
+            
+            # Try to use Playwright to find API endpoints
+            try:
+                from playwright.async_api import async_playwright
+                
+                jobs = []
+                async with async_playwright() as p:
+                    browser = await p.chromium.launch(headless=True)
+                    page = await browser.new_page()
+                    
+                    # Enable network monitoring
+                    api_responses = []
+                    
+                    def handle_response(response):
+                        if response.url and any(keyword in response.url.lower() for keyword in ['job', 'career', 'position', 'api', 'graphql']):
+                            api_responses.append({
+                                'url': response.url,
+                                'status': response.status,
+                                'headers': response.headers
+                            })
+                    
+                    page.on('response', handle_response)
+                    
+                    # Navigate to the page
+                    await page.goto(career_page_url, wait_until='networkidle', timeout=30000)
+                    await page.wait_for_timeout(5000)  # Wait for API calls
+                    
+                    logger.info(f"   📡 Found {len(api_responses)} potential API responses")
+                    
+                    # Try to extract job data from API responses
+                    for api_response in api_responses:
+                        try:
+                            if api_response['status'] == 200:
+                                # Try to get response body
+                                try:
+                                    response_body = await page.evaluate(f"""
+                                        () => {{
+                                            // Try to find the response in network tab
+                                            return null; // Placeholder for now
+                                        }}
+                                    """)
+                                    
+                                    if response_body:
+                                        # Parse JSON response
+                                        import json
+                                        data = json.loads(response_body)
+                                        jobs.extend(self._parse_api_job_data(data, career_page_url))
+                                except Exception as e:
+                                    logger.debug(f"   ⚠️ Error parsing API response: {e}")
+                                    continue
+                        except Exception as e:
+                            logger.debug(f"   ⚠️ Error processing API response: {e}")
+                            continue
+                    
+                    # Method 2: Try common API endpoints
+                    common_api_endpoints = [
+                        f"{career_page_url}/api/jobs",
+                        f"{career_page_url}/api/careers",
+                        f"{career_page_url}/api/positions",
+                        f"{career_page_url}/jobs.json",
+                        f"{career_page_url}/careers.json",
+                        f"{career_page_url}/positions.json",
+                        f"{career_page_url}/api/v1/jobs",
+                        f"{career_page_url}/api/v1/careers",
+                        f"{career_page_url}/graphql"
+                    ]
+                    
+                    for api_url in common_api_endpoints:
+                        try:
+                            # Try to fetch from API endpoint
+                            response = await page.goto(api_url, wait_until='networkidle', timeout=10000)
+                            if response and response.status == 200:
+                                content = await page.content()
+                                
+                                # Try to parse as JSON
+                                try:
+                                    import json
+                                    data = json.loads(content)
+                                    api_jobs = self._parse_api_job_data(data, career_page_url)
+                                    if api_jobs:
+                                        jobs.extend(api_jobs)
+                                        logger.info(f"   ✅ Found {len(api_jobs)} jobs from API: {api_url}")
+                                except json.JSONDecodeError:
+                                    # Not JSON, try to extract from HTML
+                                    pass
+                        except Exception as e:
+                            logger.debug(f"   ⚠️ Error fetching API endpoint {api_url}: {e}")
+                            continue
+                    
+                    await browser.close()
+                
+                logger.info(f"   ✅ API extraction completed, found {len(jobs)} jobs")
+                return jobs
+                
+            except ImportError:
+                logger.warning("   ⚠️ Playwright not available for API extraction")
+                return []
+            
+        except Exception as e:
+            logger.error(f"   ❌ Error in API extraction: {e}")
+            return []
+    
+    def _parse_api_job_data(self, data: dict, base_url: str) -> List[Dict]:
+        """Parse job data from API response"""
+        jobs = []
+        
+        try:
+            # Common API response structures
+            job_lists = []
+            
+            # Try different possible structures
+            if isinstance(data, dict):
+                # Structure 1: { "jobs": [...] }
+                if 'jobs' in data and isinstance(data['jobs'], list):
+                    job_lists.append(data['jobs'])
+                
+                # Structure 2: { "data": { "jobs": [...] } }
+                elif 'data' in data and isinstance(data['data'], dict):
+                    if 'jobs' in data['data'] and isinstance(data['data']['jobs'], list):
+                        job_lists.append(data['data']['jobs'])
+                
+                # Structure 3: { "results": [...] }
+                elif 'results' in data and isinstance(data['results'], list):
+                    job_lists.append(data['results'])
+                
+                # Structure 4: { "items": [...] }
+                elif 'items' in data and isinstance(data['items'], list):
+                    job_lists.append(data['items'])
+                
+                # Structure 5: Direct array of jobs
+                elif any(key in data for key in ['title', 'name', 'position']) and len(data) > 0:
+                    job_lists.append([data])
+            
+            elif isinstance(data, list):
+                # Direct array of jobs
+                job_lists.append(data)
+            
+            # Process job lists
+            for job_list in job_lists:
+                for job in job_list:
+                    if isinstance(job, dict):
+                        # Extract job information
+                        title = job.get('title') or job.get('name') or job.get('position') or job.get('job_title') or ''
+                        url = job.get('url') or job.get('link') or job.get('apply_url') or base_url
+                        location = job.get('location') or job.get('city') or job.get('address') or ''
+                        job_type = job.get('type') or job.get('employment_type') or job.get('job_type') or 'Full-time'
+                        description = job.get('description') or job.get('summary') or job.get('details') or ''
+                        
+                        if title and url:
+                            jobs.append({
+                                'title': title,
+                                'company': '',
+                                'location': location,
+                                'job_type': job_type,
+                                'salary': job.get('salary') or '',
+                                'posted_date': job.get('date') or job.get('created_at') or '',
+                                'url': url if url.startswith('http') else f"{base_url.rstrip('/')}/{url.lstrip('/')}",
+                                'description': description,
+                                'requirements': job.get('requirements') or '',
+                                'benefits': job.get('benefits') or ''
+                            })
+            
+            logger.info(f"   📊 Parsed {len(jobs)} jobs from API data")
+            return jobs
+            
+        except Exception as e:
+            logger.error(f"   ❌ Error parsing API job data: {e}")
+            return []
     
     def _extract_jobs_from_html_directly(self, html_content: str, base_url: str) -> List[Dict]:
         """Extract jobs directly from HTML content"""
@@ -1569,7 +1753,217 @@ class JobExtractionService:
             return []
     
     async def _extract_jobs_from_javascript(self, career_page_url: str) -> List[Dict]:
-        """Extract jobs from JavaScript data using HTML parsing (requests-only mode)"""
+        """Extract jobs from JavaScript data using Playwright for rendering"""
+        try:
+            logger.info(f"   🔍 Trying JavaScript extraction with Playwright for: {career_page_url}")
+            
+            # Try to use Playwright for JavaScript rendering
+            try:
+                from playwright.async_api import async_playwright
+                
+                jobs = []
+                async with async_playwright() as p:
+                    browser = await p.chromium.launch(headless=True)
+                    page = await browser.new_page()
+                    
+                    # Set user agent to avoid detection
+                    await page.set_extra_http_headers({
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                    })
+                    
+                    # Navigate to the page and wait for content to load
+                    await page.goto(career_page_url, wait_until='networkidle', timeout=30000)
+                    
+                    # Wait a bit more for dynamic content
+                    await page.wait_for_timeout(3000)
+                    
+                    # Method 1: Handle dynamic pagination and "Load more" buttons
+                    await self._handle_dynamic_pagination(page, career_page_url)
+                    
+                    # Method 2: Extract job data from page content after JavaScript rendering
+                    job_elements = await page.query_selector_all('[class*="job"], [class*="career"], [class*="position"], .job-listing, .career-item, .position-item')
+                    
+                    logger.info(f"   📊 Found {len(job_elements)} job elements after JavaScript rendering")
+                    
+                    for element in job_elements[:20]:  # Limit to 20 jobs
+                        try:
+                            # Extract job title
+                            title_element = await element.query_selector('h1, h2, h3, h4, .job-title, .position-title, .career-title')
+                            title = await title_element.text_content() if title_element else ''
+                            
+                            # Extract job link
+                            link_element = await element.query_selector('a[href*="job"], a[href*="career"], a[href*="position"]')
+                            job_url = await link_element.get_attribute('href') if link_element else ''
+                            
+                            if job_url and not job_url.startswith('http'):
+                                job_url = urljoin(career_page_url, job_url)
+                            
+                            # Extract location
+                            location_element = await element.query_selector('[class*="location"], .location, .job-location')
+                            location = await location_element.text_content() if location_element else ''
+                            
+                            # Extract job type
+                            type_element = await element.query_selector('[class*="type"], .job-type, .position-type')
+                            job_type = await type_element.text_content() if type_element else 'Full-time'
+                            
+                            if title and job_url:
+                                jobs.append({
+                                    'title': title.strip(),
+                                    'company': '',
+                                    'location': location.strip() if location else '',
+                                    'job_type': job_type.strip() if job_type else 'Full-time',
+                                    'salary': '',
+                                    'posted_date': '',
+                                    'url': job_url,
+                                    'description': '',
+                                    'requirements': '',
+                                    'benefits': ''
+                                })
+                                logger.info(f"   ✅ Extracted job: {title}")
+                        
+                        except Exception as e:
+                            logger.debug(f"   ⚠️ Error extracting job element: {e}")
+                            continue
+                    
+                    # Method 3: Try to extract from JavaScript variables
+                    try:
+                        js_data = await page.evaluate("""
+                            () => {
+                                const jobs = [];
+                                // Look for common job data variables
+                                if (window.jobs && Array.isArray(window.jobs)) {
+                                    return window.jobs;
+                                }
+                                if (window.jobList && Array.isArray(window.jobList)) {
+                                    return window.jobList;
+                                }
+                                if (window.careers && Array.isArray(window.careers)) {
+                                    return window.careers;
+                                }
+                                if (window.positions && Array.isArray(window.positions)) {
+                                    return window.positions;
+                                }
+                                return null;
+                            }
+                        """)
+                        
+                        if js_data and isinstance(js_data, list):
+                            logger.info(f"   📊 Found {len(js_data)} jobs from JavaScript variables")
+                            for job in js_data[:10]:
+                                if isinstance(job, dict) and job.get('title') and job.get('url'):
+                                    jobs.append({
+                                        'title': job.get('title', ''),
+                                        'company': job.get('company', ''),
+                                        'location': job.get('location', ''),
+                                        'job_type': job.get('job_type', 'Full-time'),
+                                        'salary': job.get('salary', ''),
+                                        'posted_date': job.get('posted_date', ''),
+                                        'url': job.get('url', career_page_url),
+                                        'description': job.get('description', ''),
+                                        'requirements': job.get('requirements', ''),
+                                        'benefits': job.get('benefits', '')
+                                    })
+                    except Exception as e:
+                        logger.debug(f"   ⚠️ Error extracting JavaScript variables: {e}")
+                    
+                    await browser.close()
+                
+                logger.info(f"   ✅ JavaScript extraction completed, found {len(jobs)} jobs")
+                return jobs
+                
+            except ImportError:
+                logger.warning("   ⚠️ Playwright not available, falling back to requests method")
+                # Fallback to requests method (existing code)
+                return await self._extract_jobs_from_javascript_requests(career_page_url)
+            
+        except Exception as e:
+            logger.error(f"   ❌ Error in JavaScript extraction: {e}")
+            return []
+    
+    async def _handle_dynamic_pagination(self, page, career_page_url: str):
+        """Handle dynamic pagination, infinite scroll, and 'Load more' buttons"""
+        try:
+            logger.info(f"   🔄 Handling dynamic pagination for: {career_page_url}")
+            
+            # Method 1: Handle "Load more" buttons
+            load_more_selectors = [
+                'button:has-text("Load more")',
+                'button:has-text("Show more")',
+                'button:has-text("Load more jobs")',
+                'button:has-text("View more")',
+                'a:has-text("Load more")',
+                'a:has-text("Show more")',
+                '.load-more',
+                '.show-more',
+                '[data-load-more]',
+                '[class*="load-more"]',
+                '[class*="show-more"]'
+            ]
+            
+            for selector in load_more_selectors:
+                try:
+                    load_more_button = await page.query_selector(selector)
+                    if load_more_button:
+                        logger.info(f"   🔄 Found 'Load more' button with selector: {selector}")
+                        
+                        # Click load more button multiple times
+                        for i in range(3):  # Try to load 3 more pages
+                            try:
+                                await load_more_button.click()
+                                await page.wait_for_timeout(2000)  # Wait for content to load
+                                logger.info(f"   ✅ Clicked 'Load more' button (attempt {i + 1})")
+                            except Exception as e:
+                                logger.debug(f"   ⚠️ Error clicking load more button: {e}")
+                                break
+                        break
+                except Exception as e:
+                    continue
+            
+            # Method 2: Handle infinite scroll
+            try:
+                # Scroll down multiple times to trigger infinite scroll
+                for i in range(5):  # Scroll 5 times
+                    await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                    await page.wait_for_timeout(2000)  # Wait for content to load
+                    logger.info(f"   📜 Scrolled to bottom (attempt {i + 1})")
+            except Exception as e:
+                logger.debug(f"   ⚠️ Error during infinite scroll: {e}")
+            
+            # Method 3: Handle pagination links
+            pagination_selectors = [
+                'a[href*="page="]',
+                'a[href*="p="]',
+                'a[href*="paged="]',
+                '.pagination a',
+                '.pager a',
+                '[class*="pagination"] a',
+                '[class*="pager"] a'
+            ]
+            
+            for selector in pagination_selectors:
+                try:
+                    pagination_links = await page.query_selector_all(selector)
+                    if pagination_links:
+                        logger.info(f"   📄 Found {len(pagination_links)} pagination links")
+                        
+                        # Click first few pagination links
+                        for i, link in enumerate(pagination_links[:3]):  # Click first 3 pages
+                            try:
+                                await link.click()
+                                await page.wait_for_timeout(2000)  # Wait for content to load
+                                logger.info(f"   ✅ Clicked pagination link {i + 1}")
+                            except Exception as e:
+                                logger.debug(f"   ⚠️ Error clicking pagination link: {e}")
+                                break
+                        break
+                except Exception as e:
+                    continue
+                    
+        except Exception as e:
+            logger.error(f"   ❌ Error handling dynamic pagination: {e}")
+    
+    async def _extract_jobs_from_javascript_requests(self, career_page_url: str) -> List[Dict]:
+        """Fallback method using requests (original implementation)"""
         try:
             # Use requests to get HTML content instead of Playwright
             import aiohttp
