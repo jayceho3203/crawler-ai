@@ -22,8 +22,8 @@ from ..utils.constants import (
 logger = logging.getLogger(__name__)
 
 # Tối ưu timeout cho performance
-OPTIMIZED_TIMEOUT = 30000  # 30 seconds for requests
-PAGE_WAIT_TIMEOUT = 100  # 100ms for memory optimization
+OPTIMIZED_TIMEOUT = 15000  # Giảm từ 30s xuống 15s
+PAGE_WAIT_TIMEOUT = 50  # Giảm từ 100ms xuống 50ms
 
 # Enhanced anti-bot protection
 USER_AGENTS = [
@@ -47,7 +47,7 @@ PROXY_LIST = [
 
 def get_random_delay():
     """Get random delay between requests to avoid rate limiting"""
-    return random.uniform(1.0, 3.0)
+    return random.uniform(0.5, 1.5)  # Giảm delay từ 1-3s xuống 0.5-1.5s
 
 def get_enhanced_headers(url: str):
     """Get enhanced headers with anti-bot protection"""
@@ -91,7 +91,7 @@ async def extract_with_requests(url: str) -> Dict:
         await asyncio.sleep(delay)
         
         # Enhanced retry mechanism với exponential backoff
-        max_retries = 5
+        max_retries = 3  # Giảm từ 5 xuống 3
         html_content = None
         response = None
         
@@ -108,8 +108,8 @@ async def extract_with_requests(url: str) -> Dict:
                 
                 connector = aiohttp.TCPConnector(ssl=ssl_context)
                 
-                # Add timeout with exponential backoff
-                timeout = aiohttp.ClientTimeout(total=30 + (attempt * 10))
+                # Add timeout with exponential backoff (giảm timeout)
+                timeout = aiohttp.ClientTimeout(total=15 + (attempt * 5))  # Giảm từ 30+10 xuống 15+5
                 
                 async with aiohttp.ClientSession(connector=connector) as session:
                     async with session.get(url, headers=headers, timeout=timeout, allow_redirects=True) as response:
@@ -118,7 +118,7 @@ async def extract_with_requests(url: str) -> Dict:
                         if response.status == 403:
                             if attempt < max_retries - 1:
                                 logger.warning(f"⚠️ 403 Forbidden for {url}, retrying... (attempt {attempt + 1}/{max_retries})")
-                                await asyncio.sleep(2 ** attempt)  # Exponential backoff
+                                await asyncio.sleep(1 + attempt)  # Giảm từ 2^attempt xuống 1+attempt
                                 continue
                             else:
                                 raise Exception(f"403 Forbidden after {max_retries} attempts")
@@ -126,7 +126,7 @@ async def extract_with_requests(url: str) -> Dict:
                         elif response.status == 429:  # Rate limited
                             if attempt < max_retries - 1:
                                 logger.warning(f"⚠️ 429 Rate Limited for {url}, waiting longer... (attempt {attempt + 1}/{max_retries})")
-                                await asyncio.sleep(5 + (attempt * 5))  # Longer delay for rate limiting
+                                await asyncio.sleep(2 + (attempt * 2))  # Giảm từ 5+5 xuống 2+2
                                 continue
                             else:
                                 raise Exception(f"429 Rate Limited after {max_retries} attempts")
@@ -134,7 +134,7 @@ async def extract_with_requests(url: str) -> Dict:
                         elif response.status == 503:  # Service unavailable
                             if attempt < max_retries - 1:
                                 logger.warning(f"⚠️ 503 Service Unavailable for {url}, retrying... (attempt {attempt + 1}/{max_retries})")
-                                await asyncio.sleep(3 + (attempt * 2))
+                                await asyncio.sleep(1 + attempt)  # Giảm từ 3+2 xuống 1+attempt
                                 continue
                             else:
                                 raise Exception(f"503 Service Unavailable after {max_retries} attempts")
@@ -146,14 +146,14 @@ async def extract_with_requests(url: str) -> Dict:
             except aiohttp.ClientResponseError as e:
                 if e.status in [403, 429, 503] and attempt < max_retries - 1:
                     logger.warning(f"⚠️ HTTP {e.status} for {url}, retrying... (attempt {attempt + 1}/{max_retries})")
-                    await asyncio.sleep(2 ** attempt)
+                    await asyncio.sleep(1 + attempt)  # Giảm từ 2^attempt xuống 1+attempt
                     continue
                 else:
                     raise e
             except asyncio.TimeoutError:
                 if attempt < max_retries - 1:
                     logger.warning(f"⚠️ Timeout for {url}, retrying... (attempt {attempt + 1}/{max_retries})")
-                    await asyncio.sleep(2 ** attempt)
+                    await asyncio.sleep(1 + attempt)  # Giảm từ 2^attempt xuống 1+attempt
                     continue
                 else:
                     raise Exception(f"Timeout after {max_retries} attempts")
