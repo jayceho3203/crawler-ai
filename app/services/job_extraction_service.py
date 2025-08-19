@@ -346,8 +346,30 @@ class JobExtractionService:
     
     def _is_job_url(self, url: str) -> bool:
         """Check if URL is a job detail page"""
-        job_indicators = ['/career/', '/job/', '/position/', '/vacancy/']
-        return any(indicator in url.lower() for indicator in job_indicators)
+        # Skip URLs that are likely to be 404
+        skip_patterns = [
+            'javascript:', 'mailto:', 'tel:', '#', 
+            'void(0)', 'undefined', 'null'
+        ]
+        
+        for pattern in skip_patterns:
+            if pattern in url.lower():
+                return False
+        
+        # Check for job indicators
+        job_indicators = [
+            '/career/', '/job/', '/position/', '/vacancy/',
+            '/tuyen-dung/', '/viec-lam/', '/co-hoi/',
+            '/opportunity/', '/opening/', '/apply/'
+        ]
+        
+        # Must have at least one job indicator
+        has_job_indicator = any(indicator in url.lower() for indicator in job_indicators)
+        
+        # Must be a valid HTTP URL
+        is_valid_url = url.startswith(('http://', 'https://'))
+        
+        return has_job_indicator and is_valid_url
     
     def _is_pagination_url(self, url: str) -> bool:
         """Check if URL is a pagination page"""
@@ -357,6 +379,11 @@ class JobExtractionService:
     async def _extract_single_job_detail(self, job_url: str) -> Optional[Dict]:
         """Extract details from a single job URL"""
         try:
+            # Validate URL first
+            if not self._is_job_url(job_url):
+                logger.warning(f"   ⚠️ Skipping invalid job URL: {job_url}")
+                return None
+            
             # Use the existing job detail extraction logic
             from .job_extractor import extract_job_details_from_url
             return await extract_job_details_from_url(job_url)
@@ -786,6 +813,39 @@ class JobExtractionService:
                 
                 # Extract job details from HTML
                 job_details = self._extract_job_details_from_html(result, job_url)
+                
+                # Fallback: if HTML parsing failed to get meaningful data, try AI-based extractor
+                if not job_details.get('job_name') and not job_details.get('job_description'):
+                    try:
+                        from .job_extractor import extract_job_details_with_ai
+                        logger.info("   🤖 Falling back to AI-based job detail extraction")
+                        ai_job = await extract_job_details_with_ai(result.get('html', ''), job_url)
+                        if ai_job:
+                            job_details = {
+                                'job_name': ai_job.get('job_name', ''),
+                                'job_type': ai_job.get('job_type', 'Full-time'),
+                                'job_role': ai_job.get('job_role', ai_job.get('job_name', '')),
+                                'job_description': ai_job.get('job_description', ''),
+                                'job_link': ai_job.get('job_link', job_url)
+                            }
+                    except Exception as e:
+                        logger.warning(f"   ⚠️ AI fallback failed: {e}")
+                        
+                        # Final fallback: try Playwright-based extractor
+                        try:
+                            from .job_extractor import extract_job_details_from_url
+                            logger.info("   🔄 Final fallback to Playwright-based extraction")
+                            js_job = await extract_job_details_from_url(job_url)
+                            if js_job:
+                                job_details = {
+                                    'job_name': js_job.get('job_name', ''),
+                                    'job_type': js_job.get('job_type', 'Full-time'),
+                                    'job_role': js_job.get('job_role', js_job.get('job_name', '')),
+                                    'job_description': js_job.get('job_description', ''),
+                                    'job_link': js_job.get('job_link', job_url)
+                                }
+                        except Exception as e2:
+                            logger.warning(f"   ⚠️ Playwright fallback also failed: {e2}")
             
             crawl_time = (time.time() - start_time) # Changed from datetime.now() to time.time()
             

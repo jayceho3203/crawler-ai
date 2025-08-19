@@ -46,7 +46,11 @@ async def extract_job_details_from_url(job_url: str) -> Optional[Dict]:
                         const titleSelectors = [
                             'h1', 'h2', '.job-title', '.position-title', '.career-title',
                             '.entry-title', '.post-title', '.page-title',
-                            '[data-job-title]', '[data-position-title]'
+                            '[data-job-title]', '[data-position-title]',
+                            '.title', '.job-name', '.position-name', '.career-name',
+                            '.job-heading', '.position-heading', '.career-heading',
+                            '.job-header h1', '.job-header h2', '.position-header h1',
+                            '.career-header h1', '.job-detail h1', '.job-detail h2'
                         ];
                         
                         for (const selector of titleSelectors) {
@@ -63,7 +67,14 @@ async def extract_job_details_from_url(job_url: str) -> Optional[Dict]:
                             '.position-description', '.career-description',
                             'article', '.main-content', '.job-details',
                             '.entry-content', '.post-content', '.page-content',
-                            '.job-body', '.position-body', '.career-body'
+                            '.job-body', '.position-body', '.career-body',
+                            '.job-requirements', '.job-benefits', '.job-responsibilities',
+                            '.position-requirements', '.career-requirements',
+                            '.job-detail', '.position-detail', '.career-detail',
+                            '.job-info', '.position-info', '.career-info',
+                            '.job-section', '.position-section', '.career-section',
+                            '.content-area', '.main-text', '.job-text', '.position-text',
+                            '.career-text', '.job-article', '.position-article', '.career-article'
                         ];
                         
                         for (const selector of descSelectors) {
@@ -132,6 +143,41 @@ async def extract_job_details_from_url(job_url: str) -> Optional[Dict]:
                 job_details['salary'] = job_details.get('salary', '')
                 job_details['job_link'] = job_url
                 
+                # If no description found, try to extract from main content
+                if not job_details.get('job_description'):
+                    try:
+                        # Try to get main content as fallback
+                        main_content = await page.evaluate("""
+                            () => {
+                                const selectors = [
+                                    'main', '.main', '.content', '.main-content',
+                                    'article', '.article', '.post-content',
+                                    '.job-content', '.position-content', '.career-content',
+                                    '.entry-content', '.page-content', '.body-content'
+                                ];
+                                
+                                for (const selector of selectors) {
+                                    const element = document.querySelector(selector);
+                                    if (element && element.textContent.trim().length > 100) {
+                                        return element.textContent.trim();
+                                    }
+                                }
+                                
+                                // Fallback to body content
+                                const body = document.body;
+                                if (body) {
+                                    return body.textContent.trim();
+                                }
+                                
+                                return '';
+                            }
+                        """)
+                        
+                        if main_content and len(main_content) > 100:
+                            job_details['job_description'] = main_content[:2000]  # Limit to 2000 chars
+                    except Exception as e:
+                        logger.warning(f"   ⚠️ Failed to extract main content: {e}")
+                
                 logger.info(f"   ✅ Extracted job details: {job_details.get('job_name', 'No title')}")
                 return job_details
                 
@@ -196,6 +242,202 @@ async def extract_job_details_from_url_requests(job_url: str) -> Optional[Dict]:
     except Exception as e:
         logger.error(f"Error in requests fallback: {e}")
         return None
+
+async def extract_job_details_with_ai(html_content: str, job_url: str) -> Optional[Dict]:
+    """
+    Extract job details using AI/ML approach by analyzing HTML content
+    """
+    try:
+        logger.info(f"   🤖 Using AI-based extraction for: {job_url}")
+        
+        # Parse HTML with BeautifulSoup
+        soup = BeautifulSoup(html_content, 'html.parser')
+        
+        # Remove script and style elements
+        for script in soup(["script", "style", "nav", "header", "footer"]):
+            script.decompose()
+        
+        # Get clean text content
+        text_content = soup.get_text()
+        
+        # Clean up text
+        lines = (line.strip() for line in text_content.splitlines())
+        chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
+        text_content = ' '.join(chunk for chunk in chunks if chunk)
+        
+        # AI-based extraction using pattern matching and NLP techniques
+        job_details = {
+            'job_url': job_url,
+            'job_name': '',
+            'job_description': '',
+            'job_type': 'Full-time',
+            'job_role': '',
+            'location': '',
+            'salary': '',
+            'job_link': job_url
+        }
+        
+        # Extract job title using AI patterns
+        job_details['job_name'] = extract_job_title_ai(soup, text_content)
+        
+        # Extract job description using AI patterns
+        job_details['job_description'] = extract_job_description_ai(soup, text_content)
+        
+        # Extract job type using AI patterns
+        job_details['job_type'] = extract_job_type_ai(text_content)
+        
+        # Extract location using AI patterns
+        job_details['location'] = extract_location_ai(text_content)
+        
+        # Extract salary using AI patterns
+        job_details['salary'] = extract_salary_ai(text_content)
+        
+        # Set job role same as job name
+        job_details['job_role'] = job_details['job_name']
+        
+        logger.info(f"   ✅ AI extracted: {job_details.get('job_name', 'No title')}")
+        return job_details
+        
+    except Exception as e:
+        logger.error(f"   ❌ AI extraction failed: {e}")
+        return None
+
+def extract_job_title_ai(soup: BeautifulSoup, text_content: str) -> str:
+    """
+    Extract job title using AI patterns
+    """
+    # Pattern 1: Look for common job title patterns
+    title_patterns = [
+        r'(?:We are|We\'re|Looking for|Seeking|Hiring)\s+(?:a\s+)?([A-Z][^.!?]*(?:Developer|Engineer|Analyst|Manager|Lead|Specialist|Designer|Architect))',
+        r'(?:Position|Role|Job|Vacancy):\s*([A-Z][^.!?]*)',
+        r'(?:Join us as|Become our)\s+([A-Z][^.!?]*)',
+        r'([A-Z][^.!?]*(?:Developer|Engineer|Analyst|Manager|Lead|Specialist|Designer|Architect))(?:\s+Position|\s+Role)?'
+    ]
+    
+    for pattern in title_patterns:
+        matches = re.findall(pattern, text_content, re.IGNORECASE)
+        if matches:
+            return matches[0].strip()
+    
+    # Pattern 2: Look for H1, H2 tags with job-related content
+    for tag in soup.find_all(['h1', 'h2']):
+        tag_text = tag.get_text().strip()
+        if any(keyword in tag_text.lower() for keyword in ['developer', 'engineer', 'analyst', 'manager', 'lead', 'specialist', 'designer']):
+            return tag_text
+    
+    # Pattern 3: Look for elements with job-related classes
+    job_title_selectors = [
+        '[class*="title"]', '[class*="job"]', '[class*="position"]',
+        '[class*="career"]', '[class*="role"]', '[class*="vacancy"]'
+    ]
+    
+    for selector in job_title_selectors:
+        elements = soup.select(selector)
+        for element in elements:
+            text = element.get_text().strip()
+            if any(keyword in text.lower() for keyword in ['developer', 'engineer', 'analyst', 'manager', 'lead', 'specialist', 'designer']):
+                return text
+    
+    return ''
+
+def extract_job_description_ai(soup: BeautifulSoup, text_content: str) -> str:
+    """
+    Extract job description using AI patterns
+    """
+    # Pattern 1: Look for description sections
+    desc_patterns = [
+        r'(?:About the role|Job description|Position overview|Role description|What you\'ll do|Responsibilities)[:\s]*([^.!?]*(?:[.!?][^.!?]*){5,})',
+        r'(?:We are looking for|We\'re seeking|Join our team)[:\s]*([^.!?]*(?:[.!?][^.!?]*){3,})',
+        r'(?:Requirements|Qualifications|What we need)[:\s]*([^.!?]*(?:[.!?][^.!?]*){3,})'
+    ]
+    
+    for pattern in desc_patterns:
+        matches = re.findall(pattern, text_content, re.IGNORECASE | re.DOTALL)
+        if matches:
+            return matches[0].strip()
+    
+    # Pattern 2: Look for main content areas
+    main_content_selectors = [
+        'main', '.main', '.content', '.main-content', 'article',
+        '.job-content', '.position-content', '.career-content',
+        '.entry-content', '.post-content', '.page-content'
+    ]
+    
+    for selector in main_content_selectors:
+        elements = soup.select(selector)
+        for element in elements:
+            text = element.get_text().strip()
+            if len(text) > 200:  # Must have substantial content
+                return text[:2000]  # Limit to 2000 chars
+    
+    # Pattern 3: Look for paragraphs with job-related content
+    paragraphs = soup.find_all('p')
+    job_related_text = []
+    
+    for p in paragraphs:
+        text = p.get_text().strip()
+        if len(text) > 50 and any(keyword in text.lower() for keyword in ['experience', 'skills', 'responsibilities', 'requirements', 'benefits']):
+            job_related_text.append(text)
+    
+    if job_related_text:
+        return ' '.join(job_related_text[:5])  # Join first 5 paragraphs
+    
+    return ''
+
+def extract_job_type_ai(text_content: str) -> str:
+    """
+    Extract job type using AI patterns
+    """
+    text_lower = text_content.lower()
+    
+    # Look for job type indicators
+    if any(word in text_lower for word in ['full-time', 'full time', 'permanent']):
+        return 'Full-time'
+    elif any(word in text_lower for word in ['part-time', 'part time']):
+        return 'Part-time'
+    elif any(word in text_lower for word in ['contract', 'freelance', 'temporary']):
+        return 'Contract'
+    elif any(word in text_lower for word in ['internship', 'intern']):
+        return 'Internship'
+    else:
+        return 'Full-time'  # Default
+
+def extract_location_ai(text_content: str) -> str:
+    """
+    Extract location using AI patterns
+    """
+    # Look for location patterns
+    location_patterns = [
+        r'(?:Location|Based in|Office in|Work from)[:\s]*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)',
+        r'(?:Remote|Hybrid|On-site|In-office)',
+        r'(?:Ho Chi Minh|Hanoi|Da Nang|Can Tho|Hai Phong)',
+        r'(?:Vietnam|VN)'
+    ]
+    
+    for pattern in location_patterns:
+        matches = re.findall(pattern, text_content, re.IGNORECASE)
+        if matches:
+            return matches[0].strip()
+    
+    return ''
+
+def extract_salary_ai(text_content: str) -> str:
+    """
+    Extract salary using AI patterns
+    """
+    # Look for salary patterns
+    salary_patterns = [
+        r'(?:Salary|Compensation|Pay)[:\s]*(\$?\d+(?:,\d+)*(?:-\$?\d+(?:,\d+)*)?(?:\s*(?:USD|VND|per\s+(?:year|month|hour)))?)',
+        r'(\$?\d+(?:,\d+)*(?:-\$?\d+(?:,\d+)*)?(?:\s*(?:USD|VND|per\s+(?:year|month|hour)))?)',
+        r'(?:Competitive|Attractive|Market rate|Negotiable)'
+    ]
+    
+    for pattern in salary_patterns:
+        matches = re.findall(pattern, text_content, re.IGNORECASE)
+        if matches:
+            return matches[0].strip()
+    
+    return ''
 
 def get_domain(url: str) -> str:
     """Extract domain from URL"""

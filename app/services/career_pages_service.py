@@ -61,17 +61,26 @@ class CareerPagesService:
                     'crawl_time': (datetime.now() - start_time).total_seconds()
                 }
             
-            # Step 2: Extract all URLs from the page
+                        # Step 2: Extract all URLs from the page
             all_urls = result.get('urls', [])
             logger.info(f"   📋 Found {len(all_urls)} URLs to analyze")
             
-            # Step 3: Filter and analyze URLs
+            # Step 3: Analyze HTML content for career indicators
+            html_content = result.get('html', '')
+            career_indicators = self._find_career_indicators_in_html(html_content, url)
+            
+            # Step 4: Filter and analyze URLs
             career_pages = []
             potential_career_pages = []
             rejected_urls = []
             career_page_analysis = []
             
-            # Step 4: Analyze each URL
+            # Step 5: Add career pages found from HTML analysis
+            if career_indicators['career_pages']:
+                career_pages.extend(career_indicators['career_pages'])
+                logger.info(f"   ✅ Found career pages from HTML analysis: {career_indicators['career_pages']}")
+            
+            # Step 6: Analyze each URL
             for url_found in all_urls[:max_pages_to_scan]:
                 analysis = await self._analyze_url_for_career(url_found, url, strict_filtering)
                 
@@ -199,11 +208,18 @@ class CareerPagesService:
                     analysis['confidence'] += 0.3  # Tăng từ 0.1 lên 0.3
             
             # 3. Career patterns (HIGH WEIGHT) - EASIER TO REACH 0.5
-            career_patterns = ['/career', '/careers', '/jobs', '/employment', '/tuyen-dung', '/viec-lam', '/co-hoi-nghe-nghiep', '/tuyen-nhan-vien']
+            career_patterns = [
+                '/career', '/careers', '/jobs', '/employment', 
+                '/tuyen-dung', '/viec-lam', '/co-hoi-nghe-nghiep', '/tuyen-nhan-vien',
+                '/tuyendung', '/vieclam', '/cohoi', '/tuyennhanvien',
+                '/recruitment', '/hiring', '/opportunities', '/positions',
+                '/vacancies', '/openings', '/join-us', '/work-with-us',
+                '/careers/', '/tuyen-dung/', '/viec-lam/', '/hop-tac-tuyen-dung'
+            ]
             for pattern in career_patterns:
                 if pattern in path:
                     career_indicators.append(f"Career pattern: {pattern}")
-                    analysis['confidence'] += 0.8  # Giữ nguyên 0.8
+                    analysis['confidence'] += 1.2  # Tăng từ 0.8 lên 1.2 để đảm bảo /careers/ được nhận diện
             
             # 4. Domain keywords (LOW WEIGHT)
             for keyword in self.career_keywords:
@@ -247,14 +263,14 @@ class CareerPagesService:
             
             # IMPROVED VALIDATION LOGIC (Cách 2)
             # Nếu confidence rất cao, luôn accept (bỏ qua strict validation)
-            if analysis['confidence'] >= 1.5:
+            if analysis['confidence'] >= 1.0:  # Giảm từ 1.5 xuống 1.0
                 analysis['is_career_page'] = True
                 analysis['is_potential'] = False
                 analysis['rejection_reason'] = None  # Clear rejection reason
-            elif analysis['confidence'] >= 1.0:
+            elif analysis['confidence'] >= 0.8:  # Giảm từ 1.0 xuống 0.8
                 analysis['is_career_page'] = True
                 analysis['is_potential'] = False
-            elif analysis['confidence'] >= 0.6:
+            elif analysis['confidence'] >= 0.5:  # Giảm từ 0.6 xuống 0.5
                 analysis['is_potential'] = True
             elif analysis['confidence'] < 0.0:
                 # Nếu confidence âm, reject
@@ -541,6 +557,70 @@ class CareerPagesService:
                 'crawl_time': (datetime.now() - start_time).total_seconds(),
                 'crawl_method': 'scrapy_optimized'
             }
+
+    def _find_career_indicators_in_html(self, html_content: str, base_url: str) -> Dict:
+        """
+        Find career indicators in HTML content using text analysis
+        """
+        from bs4 import BeautifulSoup
+        from urllib.parse import urljoin
+        
+        career_indicators = {
+            'career_pages': [],
+            'career_texts': [],
+            'confidence': 0.0
+        }
+        
+        try:
+            soup = BeautifulSoup(html_content, 'html.parser')
+            
+            # Vietnamese career keywords
+            vietnamese_career_keywords = [
+                'tuyển dụng', 'tuyển nhân viên', 'cơ hội nghề nghiệp', 'việc làm',
+                'tuyển dụng nhân sự', 'cơ hội việc làm', 'tuyển dụng nhân viên',
+                'tuyển dụng kỹ sư', 'tuyển dụng developer', 'tuyển dụng lập trình viên'
+            ]
+            
+            # English career keywords
+            english_career_keywords = [
+                'career', 'careers', 'job', 'jobs', 'employment', 'hiring',
+                'recruitment', 'join us', 'work with us', 'opportunities',
+                'positions', 'vacancies', 'openings'
+            ]
+            
+            all_career_keywords = vietnamese_career_keywords + english_career_keywords
+            
+            # Find all links with career-related text
+            career_links = []
+            for link in soup.find_all('a', href=True):
+                link_text = link.get_text().strip().lower()
+                href = link.get('href', '')
+                
+                # Check if link text contains career keywords
+                if any(keyword in link_text for keyword in all_career_keywords):
+                    career_links.append({
+                        'text': link.get_text().strip(),
+                        'href': href,
+                        'full_url': urljoin(base_url, href)
+                    })
+            
+            # Find career pages from links
+            for link_info in career_links:
+                full_url = link_info['full_url']
+                if full_url.startswith(('http://', 'https://')):
+                    career_indicators['career_pages'].append(full_url)
+                    career_indicators['career_texts'].append(link_info['text'])
+            
+            # Calculate confidence based on findings
+            if career_indicators['career_pages']:
+                career_indicators['confidence'] = min(len(career_indicators['career_pages']) * 0.3, 1.0)
+            
+            logger.info(f"   🔍 Found {len(career_indicators['career_pages'])} career pages from HTML analysis")
+            
+        except Exception as e:
+            logger.warning(f"   ⚠️ Error analyzing HTML for career indicators: {e}")
+        
+        return career_indicators
 
     def _calculate_confidence_score(self, career_pages: int, potential_pages: int, total_urls: int) -> float:
         """Calculate confidence score for career page detection"""
