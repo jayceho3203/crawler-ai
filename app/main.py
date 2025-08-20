@@ -9,6 +9,8 @@ import gc
 import logging
 import psutil
 import asyncio
+import subprocess
+import sys
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -33,12 +35,44 @@ def log_memory_usage():
     memory_mb = get_memory_usage()
     logger.info(f"💾 Current memory usage: {memory_mb:.1f} MB")
 
+async def ensure_playwright_browsers():
+    """Ensure Playwright browsers are installed"""
+    try:
+        # Try to import and launch browser
+        from playwright.async_api import async_playwright
+        async with async_playwright() as p:
+            browser = await p.chromium.launch()
+            await browser.close()
+        logger.info("✅ Playwright browsers already installed")
+        return True
+    except Exception as e:
+        logger.warning(f"⚠️ Playwright browsers not found: {e}")
+        try:
+            # Install browsers
+            logger.info("🔧 Installing Playwright browsers...")
+            result = subprocess.run([
+                sys.executable, "-m", "playwright", "install", "chromium"
+            ], capture_output=True, text=True, timeout=300)
+            
+            if result.returncode == 0:
+                logger.info("✅ Playwright browsers installed successfully")
+                return True
+            else:
+                logger.error(f"❌ Failed to install Playwright browsers: {result.stderr}")
+                return False
+        except Exception as install_error:
+            logger.error(f"❌ Error installing Playwright browsers: {install_error}")
+            return False
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager with memory optimization"""
     # Startup
-    logger.info("🚀 Starting crawler-ai service (requests-only mode)...")
+    logger.info("🚀 Starting crawler-ai service...")
     log_memory_usage()
+    
+    # Ensure Playwright browsers are installed
+    await ensure_playwright_browsers()
     
     yield
     
