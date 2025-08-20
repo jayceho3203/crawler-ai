@@ -3,7 +3,7 @@
 Pydantic models for API requests and responses
 """
 
-from pydantic import BaseModel
+from pydantic import BaseModel, validator
 from typing import Optional, List, Dict
 
 class CrawlRequest(BaseModel):
@@ -199,6 +199,29 @@ class JobDetailRequest(BaseModel):
     """Request model for job detail crawling"""
     job_urls: List[str]
     max_jobs: Optional[int] = 50
+
+class JobDetailValidationRequest(BaseModel):
+    """Request model for job detail validation (n8n integration)"""
+    job_name: str
+    job_type: str = ""
+    job_role: str = ""
+    job_description: str
+    job_link: str  # Must be valid URL
+    crawl_company_id: str
+    
+    @validator('job_link')
+    def validate_job_link(cls, v):
+        if not v:
+            raise ValueError('Job link cannot be empty')
+        if not v.startswith(('http://', 'https://')):
+            raise ValueError('Job link must be a valid HTTP/HTTPS URL')
+        return v
+    
+    @validator('job_description')
+    def validate_job_description(cls, v):
+        if not v or len(v.strip()) < 10:
+            raise ValueError('Job description must be at least 10 characters')
+        return v
 
 class ChildLinksRequest(BaseModel):
     """Request model for crawling child links"""

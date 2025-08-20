@@ -24,9 +24,13 @@ except ImportError:
 
 # Default headers without brotli to avoid decode errors
 DEFAULT_HEADERS_NO_BROTLI = {
-    "User-Agent": "Mozilla/5.0 (crawler; +https://example.com/bot)",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9,vi;q=0.8",
     "Accept-Encoding": "gzip, deflate",  # Explicitly exclude brotli
+    "Cache-Control": "no-cache",
+    "DNT": "1",
+    "Upgrade-Insecure-Requests": "1",
 }
 
 from .cache import get_cached_result, cache_result
@@ -164,7 +168,12 @@ async def extract_with_requests(url: str) -> Dict:
             except aiohttp.ClientResponseError as e:
                 if e.status in [403, 429, 503] and attempt < max_retries - 1:
                     logger.warning(f"⚠️ HTTP {e.status} for {url}, retrying... (attempt {attempt + 1}/{max_retries})")
-                    await asyncio.sleep(1 + attempt)  # Giảm từ 2^attempt xuống 1+attempt
+                    # Add jitter for 403 errors
+                    if e.status == 403:
+                        jitter = random.uniform(0.5, 1.5)
+                        await asyncio.sleep(jitter + attempt)
+                    else:
+                        await asyncio.sleep(1 + attempt)  # Giảm từ 2^attempt xuống 1+attempt
                     continue
                 else:
                     raise e

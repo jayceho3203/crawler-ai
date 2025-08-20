@@ -344,6 +344,15 @@ class JobExtractionService:
             logger.error(f"   ❌ Error in pagination crawl: {e}")
             return all_job_urls
     
+    def _is_http_url(self, url: str) -> bool:
+        """Check if URL is a valid HTTP/HTTPS URL"""
+        try:
+            from urllib.parse import urlparse
+            parsed = urlparse(url)
+            return parsed.scheme in ('http', 'https')
+        except:
+            return False
+    
     def _is_job_url(self, url: str) -> bool:
         """Check if URL is a job detail page"""
         # Skip URLs that are likely to be 404
@@ -356,6 +365,15 @@ class JobExtractionService:
             if pattern in url.lower():
                 return False
         
+        # Skip sitemap and other non-job files
+        skip_files = ['sitemap.xml', 'robots.txt', '.xml', '.json', '.pdf', '.doc', '.docx']
+        if any(file_ext in url.lower() for file_ext in skip_files):
+            return False
+        
+        # Must be a valid HTTP URL
+        if not self._is_http_url(url):
+            return False
+        
         # Check for job indicators
         job_indicators = [
             '/career/', '/job/', '/position/', '/vacancy/',
@@ -366,10 +384,7 @@ class JobExtractionService:
         # Must have at least one job indicator
         has_job_indicator = any(indicator in url.lower() for indicator in job_indicators)
         
-        # Must be a valid HTTP URL
-        is_valid_url = url.startswith(('http://', 'https://'))
-        
-        return has_job_indicator and is_valid_url
+        return has_job_indicator
     
     def _is_pagination_url(self, url: str) -> bool:
         """Check if URL is a pagination page"""

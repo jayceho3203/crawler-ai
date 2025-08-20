@@ -290,6 +290,34 @@ class ContactExtractorService:
         
         return contact_data
     
+    def _normalize_social_url(self, url: str) -> str:
+        """Normalize social media URLs to fix duplicate domains"""
+        import re
+        
+        url_lower = url.lower()
+        
+        # Fix Facebook duplicate domains
+        url_lower = re.sub(r'(https?://)?(www\.)?facebook\.com/facebook\.com/', 'https://www.facebook.com/', url_lower)
+        url_lower = re.sub(r'(https?://)?(www\.)?facebook\.com/facebook\.com', 'https://www.facebook.com/', url_lower)
+        
+        # Fix Instagram duplicate domains
+        url_lower = re.sub(r'(https?://)?(www\.)?instagram\.com/instagram\.com/', 'https://www.instagram.com/', url_lower)
+        url_lower = re.sub(r'(https?://)?(www\.)?instagram\.com/instagram\.com', 'https://www.instagram.com/', url_lower)
+        
+        # Fix LinkedIn duplicate domains
+        url_lower = re.sub(r'(https?://)?(www\.)?linkedin\.com/linkedin\.com/', 'https://www.linkedin.com/', url_lower)
+        url_lower = re.sub(r'(https?://)?(www\.)?linkedin\.com/linkedin\.com', 'https://www.linkedin.com/', url_lower)
+        
+        # Ensure proper scheme
+        if url_lower.startswith('facebook.com/'):
+            url_lower = 'https://www.facebook.com/' + url_lower[13:]
+        elif url_lower.startswith('instagram.com/'):
+            url_lower = 'https://www.instagram.com/' + url_lower[14:]
+        elif url_lower.startswith('linkedin.com/'):
+            url_lower = 'https://www.linkedin.com/' + url_lower[13:]
+        
+        return url_lower
+
     def _extract_social_media_enhanced(self, result: Dict, base_url: str) -> List[str]:
         """Enhanced social media detection"""
         social_links = []
@@ -330,7 +358,9 @@ class ContactExtractorService:
             # Remove HTML artifacts and invalid characters
             clean_link = link.split('\\')[0].split('"')[0].split('>')[0].strip()
             if clean_link and clean_link.startswith(('http://', 'https://')):
-                cleaned_links.append(clean_link)
+                # Normalize social media URLs
+                normalized_link = self._normalize_social_url(clean_link)
+                cleaned_links.append(normalized_link)
         
         # Remove duplicates
         return list(dict.fromkeys(cleaned_links))

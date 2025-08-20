@@ -191,7 +191,15 @@ class CareerPagesService:
                 potential_career_pages.extend(subdomain_results['potential_pages'])
                 career_page_analysis.extend(subdomain_results['analysis'])
             else:
-                logger.info(f"   ⚠️ Subdomain search disabled")
+                # 🔍 Enable dynamic subdomain search
+                logger.info(f"   🔍 Starting dynamic subdomain search for: {url}")
+                subdomain_results = await self._search_subdomains(url, strict_filtering)
+                if subdomain_results['career_pages']:
+                    logger.info(f"   ✅ Found {len(subdomain_results['career_pages'])} career pages from subdomains")
+                    career_pages.extend(subdomain_results['career_pages'])
+                if subdomain_results['potential_pages']:
+                    logger.info(f"   ⚠️ Found {len(subdomain_results['potential_pages'])} potential pages from subdomains")
+                    potential_career_pages.extend(subdomain_results['potential_pages'])
             
             # Step 6: Job board integration (if enabled)
             if include_job_boards:
@@ -256,6 +264,42 @@ class CareerPagesService:
                 'crawl_time': (datetime.now() - start_time).total_seconds()
             }
     
+    def _is_xml_response(self, url: str, html_content: str = None) -> bool:
+        """Check if response is XML content"""
+        if url.lower().endswith(('.xml', '.rss', '.atom')):
+            return True
+        if html_content and html_content.strip().startswith('<?xml'):
+            return True
+        return False
+    
+    async def _parse_sitemap(self, xml_text: str, base_url: str) -> List[str]:
+        """Parse sitemap XML and extract job/career URLs"""
+        try:
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(xml_text, "xml")
+            
+            # Extract all <loc> elements
+            locs = [loc.get_text(strip=True) for loc in soup.find_all("loc")]
+            
+            # Filter for job/career related URLs
+            job_keywords = [
+                "career", "careers", "job", "jobs", "recruit", "tuyen-dung", 
+                "viec-lam", "employment", "opportunity", "position", "vacancy"
+            ]
+            
+            job_urls = []
+            for url in locs:
+                url_lower = url.lower()
+                if any(keyword in url_lower for keyword in job_keywords):
+                    job_urls.append(url)
+            
+            logger.info(f"   📋 Sitemap parsing: found {len(locs)} total URLs, {len(job_urls)} job-related")
+            return job_urls
+            
+        except Exception as e:
+            logger.warning(f"   ⚠️ Failed to parse sitemap: {e}")
+            return []
+
     async def _analyze_url_for_career(self, url: str, base_url: str, strict_filtering: bool) -> Dict:
         """Analyze a single URL for career page indicators with improved scoring and validation"""
         analysis = {
@@ -268,6 +312,11 @@ class CareerPagesService:
         }
         
         try:
+            # Check if this is XML/sitemap content
+            if self._is_xml_response(url):
+                analysis['rejection_reason'] = 'XML/sitemap content - not a career page'
+                return analysis
+            
             # Skip non-HTTP URLs
             if not url.startswith(('http://', 'https://')):
                 analysis['rejection_reason'] = 'Non-HTTP URL'
@@ -336,11 +385,21 @@ class CareerPagesService:
                 '/service': -0.5,      # Tăng penalty
                 '/news': -0.4,         # Tăng penalty
                 '/blog': -0.4,         # Tăng penalty
+                '/blogs': -0.4,        # Tăng penalty
+                '/post': -0.4,         # Tăng penalty
+                '/posts': -0.4,        # Tăng penalty
                 '/article': -0.4,      # Tăng penalty
+                '/insights': -0.4,     # Tăng penalty
+                '/showcase': -0.4,     # Tăng penalty
+                '/case-': -0.4,        # Tăng penalty
                 '/about': -0.3,        # Giữ nguyên
                 '/contact': -0.3,      # Giữ nguyên
                 '/admin': -0.8,        # Tăng penalty
                 '/login': -0.8,        # Tăng penalty
+                'sitemap.xml': -1.0,   # Strong penalty for sitemap
+                'robots.txt': -1.0,    # Strong penalty for robots
+                '.xml': -0.8,          # Penalty for XML files
+                '.json': -0.8,         # Penalty for JSON files
             }
             
             for pattern, penalty in non_career_patterns.items():

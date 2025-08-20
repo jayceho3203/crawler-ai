@@ -13,7 +13,7 @@ from pydantic import BaseModel
 
 from ..models.schemas import (
     CrawlRequest, CrawlResponse, BatchCrawlRequest, BatchCrawlResponse,
-    JobDetailRequest, ChildLinksRequest, AIExtractionRequest,
+    JobDetailRequest, JobDetailValidationRequest, ChildLinksRequest, AIExtractionRequest,
     ContactInfoRequest, ContactInfoResponse, CareerPagesRequest, CareerPagesResponse,
     BatchCareerPagesRequest, BatchCareerPagesResponse,
     JobExtractionRequest, JobExtractionResponse, AdvancedJobFindingRequest, AdvancedJobFindingResponse
@@ -298,6 +298,42 @@ async def extract_job_details(request: JobDetailsRequest):
             'job_role': '',
             'job_description': '',
             'job_link': request.url
+        }
+
+@router.post("/validate_job_details")
+async def validate_job_details(request: JobDetailValidationRequest):
+    """
+    Validate job details before processing (n8n integration)
+    """
+    try:
+        logger.info(f"🔍 Validating job details for: {request.job_name}")
+        
+        # Validation is handled by Pydantic model
+        # If we reach here, validation passed
+        
+        return {
+            "success": True,
+            "validated_data": {
+                "job_name": request.job_name,
+                "job_type": request.job_type,
+                "job_role": request.job_role,
+                "job_description": request.job_description,
+                "job_link": request.job_link,
+                "crawl_company_id": request.crawl_company_id
+            },
+            "message": "Job details validated successfully"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error validating job details: {e}")
+        return {
+            "success": False,
+            "error_message": str(e),
+            "validation_errors": [
+                {"field": "job_link", "message": "Job link must be a valid URL"} if "job_link" in str(e) else
+                {"field": "job_description", "message": "Job description must be at least 10 characters"} if "job_description" in str(e) else
+                {"field": "unknown", "message": str(e)}
+            ]
         }
 
 class AIAgentRequest(BaseModel):
