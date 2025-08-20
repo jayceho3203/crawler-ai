@@ -303,7 +303,7 @@ class ContactExtractorService:
                 if platform == 'facebook':
                     social_links.append(f"https://facebook.com/{match}")
                 elif platform == 'linkedin':
-                    social_links.append(f"https://twitter.com/{match}")
+                    social_links.append(f"https://linkedin.com/{match}")
                 elif platform == 'twitter':
                     social_links.append(f"https://twitter.com/{match}")
                 elif platform == 'instagram':
@@ -324,8 +324,16 @@ class ContactExtractorService:
                 logger.warning(f"Error processing URL {url}: {e}")
                 continue
         
+        # Clean and validate URLs
+        cleaned_links = []
+        for link in social_links:
+            # Remove HTML artifacts and invalid characters
+            clean_link = link.split('\\')[0].split('"')[0].split('>')[0].strip()
+            if clean_link and clean_link.startswith(('http://', 'https://')):
+                cleaned_links.append(clean_link)
+        
         # Remove duplicates
-        return list(set(social_links))
+        return list(dict.fromkeys(cleaned_links))
     
     def _extract_phone_numbers(self, result: dict) -> list[str]:
         """Extract phone numbers from content with improved patterns"""

@@ -168,6 +168,8 @@ async def detect_career_pages_scrapy_main(request: CareerPagesRequest):
                 # dedupe
                 merged["emails"] = list(dict.fromkeys(merged["emails"]))
                 merged["phones"] = list(dict.fromkeys(merged["phones"]))
+                merged["social_links"] = list(dict.fromkeys(merged["social_links"]))
+                merged["contact_forms"] = list(dict.fromkeys(merged["contact_forms"]))
                 contact_info = {**merged, "website": request.url}
                 logger.info(f"✅ Contact info extracted from {len(unique_targets)} pages: {len(merged['emails'])} emails, {len(merged['phones'])} phones")
             else:

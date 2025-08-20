@@ -301,7 +301,10 @@ class CareerPagesService:
             # Common subdomain patterns for career pages
             subdomain_patterns = [
                 'career', 'careers', 'jobs', 'employment',
-                'tuyen-dung', 'viec-lam', 'hr', 'recruitment'
+                'tuyen-dung', 'viec-lam', 'hr', 'recruitment',
+                'tuyendung', 'vieclam', 'cohoi', 'nhanvien',
+                'ungvien', 'congviec', 'lamviec', 'nghenghiep',
+                'talent', 'team', 'opportunities', 'positions'
             ]
             
             # Generate subdomain URLs
@@ -313,10 +316,23 @@ class CareerPagesService:
                     subdomain_urls.append(f"https://{pattern}.{domain}{career_pattern}")
             
             # Test subdomain URLs
+            logger.info(f"   🔍 Testing {len(subdomain_urls)} subdomain URLs for {domain}")
             tasks = []
             for subdomain_url in subdomain_urls:
+                logger.info(f"   🔗 Testing subdomain: {subdomain_url}")
                 task = self._test_subdomain_url(subdomain_url, strict_filtering)
                 tasks.append(task)
+            
+            # Add timeout for subdomain search
+            if tasks:
+                try:
+                    results = await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), timeout=60)
+                except asyncio.TimeoutError:
+                    logger.warning(f"   ⚠️ Subdomain search timeout after 60s")
+                    results = []
+                except Exception as e:
+                    logger.error(f"   ❌ Subdomain search error: {e}")
+                    results = []
             
             if tasks:
                 results = await asyncio.gather(*tasks, return_exceptions=True)
