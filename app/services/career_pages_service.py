@@ -5,14 +5,19 @@ Enhanced career page detection service
 
 import logging
 import asyncio
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Set, Tuple
 from urllib.parse import urljoin, urlparse
 from datetime import datetime
+import re
+import os
+import json
+import socket
 
 from ..utils.constants import CAREER_KEYWORDS_VI, CAREER_SELECTORS, JOB_BOARD_DOMAINS
 from ..services.career_detector import filter_career_urls
 from .crawler import crawl_single_url
 from .scrapy_runner import run_spider
+from bs4 import BeautifulSoup
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +35,85 @@ class CareerPagesService:
             'jobs.vn', 'careerlink.vn', 'topcv.vn', 'mywork.vn',
             'indeed.com', 'linkedin.com/jobs', 'glassdoor.com'
         ]
+        
+        # Performance configuration
+        self.GLOBAL_TIMEOUT = 60
+        self.PER_TASK_TIMEOUT = 12
+        self.MAX_CONCURRENCY = 20
+        self.HTTP_TIMEOUT = 8.0
+        
+        # Career keywords for content analysis (NOT for subdomain generation)
+        self.CAREER_KEYWORDS = [
+            # EN
+            r"\bcareers?\b", r"\bjobs?\b", r"\bemployment\b", r"\bjoin\s+us\b",
+            r"\bwork\s+with\s+us\b", r"\bopenings?\b", r"\bvacanc(?:y|ies)\b",
+            # VI
+            r"\btuyển\s*dụng\b", r"\bviệc\s*làm\b", r"\bcơ\s*hội\s*nghề\s*nghiệp\b",
+            r"\bgia nhập\b", r"\bứng tuyển\b", r"\btin tuyển\b",
+        ]
+        self.career_re = re.compile("|".join(self.CAREER_KEYWORDS), flags=re.IGNORECASE)
+    
+    def _safe_domain(self, base_url: str) -> Tuple[str, str]:
+        """Extract root domain and netloc safely"""
+        parsed = urlparse(base_url if '://' in base_url else f"https://{base_url}")
+        netloc = parsed.netloc or parsed.path
+        netloc = netloc.lower().strip().rstrip('/')
+        if netloc.startswith('www.'):
+            netloc = netloc[4:]
+        
+        # Simple root domain extraction
+        parts = netloc.split('.')
+        root = netloc
+        if len(parts) >= 3:
+            # Keep last 2-3 parts as TLD + SLD
+            root = '.'.join(parts[-3:]) if len(parts[-1]) <= 2 else '.'.join(parts[-2:])
+        
+        return root, netloc
+    
+    def _is_subdomain_of(self, candidate_host: str, root_domain: str) -> bool:
+        """Check if candidate is subdomain of root domain"""
+        c = candidate_host.lower().strip('.')
+        r = root_domain.lower().strip('.')
+        return c.endswith('.' + r) and c != r
+    
+    def _normalize_url(self, url: str, base: str) -> str:
+        """Normalize URL with base"""
+        try:
+            return urljoin(base, url)
+        except Exception:
+            return url
+    
+    def _collect_hosts_from_html(self, html: str, base_url: str) -> Set[str]:
+        """Extract all hostnames from HTML content"""
+        hosts: Set[str] = set()
+        soup = BeautifulSoup(html, 'html.parser')
+        
+        def _push(u: str):
+            if not u:
+                return
+            absu = self._normalize_url(u, base_url)
+            p = urlparse(absu)
+            if p.netloc:
+                hosts.add(p.netloc.lower())
+        
+        # Extract from common URL attributes
+        for tag, attr in [('a', 'href'), ('link', 'href'), ('script', 'src'),
+                          ('img', 'src'), ('form', 'action'), ('source', 'src'),
+                          ('iframe', 'src')]:
+            for el in soup.find_all(tag):
+                _push(el.get(attr))
+        
+        # Extract from inline scripts/styles
+        inline_texts = []
+        for el in soup.find_all(['script', 'style']):
+            if el.string:
+                inline_texts.append(el.string)
+        
+        blob = '\n'.join(inline_texts)
+        for m in re.finditer(r'https?://([A-Za-z0-9\-\._~%]+)(?:[:/][^\s\'"]*)?', blob):
+            hosts.add(m.group(1).lower())
+        
+        return hosts
     
     async def detect_career_pages(self, url: str, include_subdomain_search: bool = False,
                                 max_pages_to_scan: int = 100, strict_filtering: bool = False,  # Default to False
@@ -301,58 +385,98 @@ class CareerPagesService:
         try:
             parsed = urlparse(base_url)
             domain = parsed.netloc
+            
+            # Fallback if netloc is empty (no scheme)
+            if not domain:
+                domain = parsed.path.strip('/')
+                logger.warning(f"   ⚠️ No scheme in URL, using path: {domain}")
+            
             # Remove www. prefix for subdomain generation
             if domain.startswith('www.'):
                 domain = domain[4:]
+            
+            # Validate domain
+            if not domain or '.' not in domain:
+                logger.error(f"   ❌ Invalid domain: {domain}")
+                return subdomain_results
+                
             logger.info(f"   🔍 Parsed domain: {domain} (cleaned from {parsed.netloc})")
             
-            # Common subdomain patterns for career pages
-            subdomain_patterns = [
-                'career', 'careers', 'jobs', 'employment',
-                'tuyen-dung', 'viec-lam', 'hr', 'recruitment',
-                'tuyendung', 'vieclam', 'cohoi', 'nhanvien',
-                'ungvien', 'congviec', 'lamviec', 'nghenghiep',
-                'talent', 'team', 'opportunities', 'positions'
-            ]
+            # Dynamic subdomain discovery (NO MORE HARDCODED PATTERNS!)
+            logger.info(f"   🔍 Starting dynamic subdomain discovery for: {domain}")
             
-            # Generate subdomain URLs
-            subdomain_urls = []
-            for pattern in subdomain_patterns:
-                subdomain_urls.append(f"https://{pattern}.{domain}")
-                # Add common career page patterns
-                for career_pattern in ['/career', '/careers', '/jobs', '/tuyen-dung', '/viec-lam']:
-                    subdomain_urls.append(f"https://{pattern}.{domain}{career_pattern}")
+            # Use smart subdomain search instead of hardcoded patterns
+            subdomain_urls = await self._smart_subdomain_search(base_url)
+            
+            logger.info(f"   🔗 Dynamic discovery found {len(subdomain_urls)} subdomain URLs")
             
             logger.info(f"   🔗 Generated {len(subdomain_urls)} subdomain URLs")
             logger.info(f"   🔗 Sample URLs: {subdomain_urls[:3]}")
             
-            # Test subdomain URLs
+            # Test subdomain URLs with concurrency limit
             logger.info(f"   🔍 Testing {len(subdomain_urls)} subdomain URLs for {domain}")
+            
+            # Limit concurrency to avoid overwhelming servers
+            semaphore = asyncio.Semaphore(20)  # Max 20 concurrent requests
+            
+            async def limited_test_subdomain(url):
+                async with semaphore:
+                    return await self._test_subdomain_url(url, strict_filtering)
+            
             tasks = []
             for subdomain_url in subdomain_urls:
                 logger.info(f"   🔗 Testing subdomain: {subdomain_url}")
-                task = self._test_subdomain_url(subdomain_url, strict_filtering)
+                task = limited_test_subdomain(subdomain_url)
                 tasks.append(task)
             
-            # Test subdomain URLs with timeout
+            # Test subdomain URLs with improved timeout handling
             if tasks:
                 try:
-                    results = await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), timeout=60)
-                    logger.info(f"   ✅ Subdomain search completed with {len(results)} results")
-                except asyncio.TimeoutError:
-                    logger.warning(f"   ⚠️ Subdomain search timeout after 60s")
+                    # Use asyncio.wait with timeout to get completed tasks
+                    done, pending = await asyncio.wait(
+                        tasks, 
+                        timeout=60,
+                        return_when=asyncio.FIRST_COMPLETED
+                    )
+                    
+                    # Cancel pending tasks
+                    for task in pending:
+                        task.cancel()
+                    
+                    # Get results from completed tasks
                     results = []
+                    for task in done:
+                        try:
+                            result = await task
+                            results.append(result)
+                        except Exception as e:
+                            logger.warning(f"   ⚠️ Task failed: {e}")
+                            results.append({
+                                'url': 'unknown',
+                                'success': False,
+                                'is_career_page': False,
+                                'is_potential': False,
+                                'rejection_reason': f'Task error: {str(e)}'
+                            })
+                    
+                    logger.info(f"   ✅ Subdomain search completed: {len(results)} completed, {len(pending)} cancelled")
+                    
+                    # Process results with better error handling
+                    for result in results:
+                        if isinstance(result, dict):
+                            if result.get('success'):
+                                if result.get('is_career_page'):
+                                    subdomain_results['career_pages'].append(result.get('url', 'unknown'))
+                                elif result.get('is_potential'):
+                                    subdomain_results['potential_pages'].append(result.get('url', 'unknown'))
+                                subdomain_results['analysis'].append(result)
+                            else:
+                                logger.warning(f"   ⚠️ Subdomain failed: {result.get('rejection_reason', 'Unknown error')}")
+                        else:
+                            logger.warning(f"   ⚠️ Unexpected result type: {type(result)}")
                 except Exception as e:
                     logger.error(f"   ❌ Subdomain search error: {e}")
                     results = []
-                
-                for result in results:
-                    if isinstance(result, dict) and result.get('success'):
-                        if result.get('is_career_page'):
-                            subdomain_results['career_pages'].append(result['url'])
-                        elif result.get('is_potential'):
-                            subdomain_results['potential_pages'].append(result['url'])
-                        subdomain_results['analysis'].append(result)
             
         except Exception as e:
             logger.error(f"Error in subdomain search: {e}")
@@ -592,9 +716,6 @@ class CareerPagesService:
         """
         Find career indicators in HTML content using text analysis
         """
-        from bs4 import BeautifulSoup
-        from urllib.parse import urljoin
-        
         career_indicators = {
             'career_pages': [],
             'career_texts': [],
@@ -668,3 +789,165 @@ class CareerPagesService:
         
         total_score = base_score + potential_bonus + coverage_score
         return min(total_score, 1.0) 
+
+    async def _smart_subdomain_search(self, base_url: str) -> List[str]:
+        """
+        Smart subdomain search with 3-tier approach:
+        1. Dynamic discovery from base domain content
+        2. DNS/CT enumeration (if available)
+        3. Minimal fallback from config (NO hardcoding)
+        """
+        root_domain, netloc = self._safe_domain(base_url)
+        subdomains: List[str] = []
+        
+        logger.info(f"   🔍 Smart subdomain search for root domain: {root_domain}")
+        
+        # 1) Dynamic discovery (primary)
+        discovered = await self._discover_subdomains_dynamically(base_url)
+        subdomains.extend(discovered)
+        logger.info(f"   ✅ Dynamic discovery found: {len(discovered)} subdomains")
+        
+        # 2) DNS/CT enumeration (secondary) - placeholder for future
+        # dns_found = await self._enumerate_subdomains_dns(root_domain)
+        # subdomains.extend(dns_found)
+        
+        # Dedup early
+        subdomains = sorted(set(subdomains))
+        
+        # 3) Minimal fallback (ONLY IF NEEDED; NO hardcoding in code)
+        if not subdomains:
+            fallback = self._get_minimal_fallback_patterns(root_domain)
+            subdomains.extend(fallback)
+            logger.info(f"   ⚠️ Using minimal fallback: {len(fallback)} patterns")
+        
+        # Final dedup
+        final_subdomains = sorted(set(subdomains))
+        logger.info(f"   🎯 Total unique subdomains found: {len(final_subdomains)}")
+        
+        return final_subdomains
+    
+    async def _discover_subdomains_dynamically(self, base_url: str) -> List[str]:
+        """
+        Discover subdomains from base domain HTML content
+        """
+        root_domain, netloc = self._safe_domain(base_url)
+        start_url = base_url if '://' in base_url else f"https://{netloc}"
+        
+        candidates: Set[str] = set()
+        alive_urls: List[str] = []
+        
+        try:
+            # Fetch base HTML
+            result = await crawl_single_url(start_url)
+            if not result or not result.get('success') or not result.get('html'):
+                logger.warning(f"   ⚠️ Failed to fetch base domain HTML")
+                return []
+            
+            html = result.get('html', '')
+            logger.info(f"   📄 Base domain HTML length: {len(html)}")
+            
+            # Collect hosts from HTML
+            hosts = self._collect_hosts_from_html(html, start_url)
+            logger.info(f"   🔍 Found {len(hosts)} total hosts in HTML")
+            
+            # Filter: only keep subdomains of root_domain
+            for h in hosts:
+                if self._is_subdomain_of(h, root_domain):
+                    candidates.add(h)
+            
+            logger.info(f"   🎯 Filtered to {len(candidates)} candidate subdomains")
+            
+            if not candidates:
+                return []
+            
+            # Validate subdomains with concurrency limit
+            sem = asyncio.Semaphore(self.MAX_CONCURRENCY)
+            
+            async def limited_validate(host: str):
+                async with sem:
+                    return await self._validate_host_alive(host)
+            
+            tasks = [limited_validate(h) for h in candidates]
+            
+            # Use asyncio.wait with timeout
+            done, pending = await asyncio.wait(tasks, timeout=self.GLOBAL_TIMEOUT)
+            
+            # Cancel pending tasks
+            for task in pending:
+                task.cancel()
+            
+            # Collect results
+            for task in done:
+                try:
+                    result = task.result()
+                    if result and result.get('alive'):
+                        alive_urls.append(result.get('url', ''))
+                except Exception as e:
+                    logger.warning(f"   ⚠️ Task failed: {e}")
+                    continue
+            
+            logger.info(f"   ✅ Validation completed: {len(alive_urls)} alive subdomains")
+            
+        except Exception as e:
+            logger.error(f"   ❌ Dynamic discovery error: {e}")
+        
+        return alive_urls
+    
+    async def _validate_host_alive(self, host: str) -> Dict:
+        """
+        Validate if host is alive (DNS + HTTP)
+        """
+        try:
+            # Simple validation using existing crawl_single_url
+            url = f"https://{host}"
+            result = await crawl_single_url(url)
+            
+            if result and result.get('success'):
+                return {
+                    'alive': True,
+                    'url': url,
+                    'host': host
+                }
+            else:
+                # Try HTTP as fallback
+                url = f"http://{host}"
+                result = await crawl_single_url(url)
+                
+                if result and result.get('success'):
+                    return {
+                        'alive': True,
+                        'url': url,
+                        'host': host
+                    }
+            
+            return {
+                'alive': False,
+                'url': url,
+                'host': host
+            }
+            
+        except Exception as e:
+            logger.warning(f"      ⚠️ Host validation failed for {host}: {e}")
+            return {
+                'alive': False,
+                'url': f"https://{host}",
+                'host': host,
+                'error': str(e)
+            }
+    
+    def _get_minimal_fallback_patterns(self, domain: str) -> List[str]:
+        """
+        NO hardcoding in code - read from ENV or config
+        """
+        # Read from environment variable
+        raw = os.getenv("CRAWLER_FALLBACK_SUBDOMAINS", "").strip()
+        if not raw:
+            logger.info(f"   ℹ️ No fallback patterns configured - returning empty list")
+            return []
+        
+        # Parse comma-separated patterns
+        tags = [t.strip().lower() for t in raw.split(',') if t.strip()]
+        urls = [f"https://{t}.{domain}" for t in tags]
+        
+        logger.info(f"   🔧 Using fallback patterns from ENV: {tags}")
+        return urls 
