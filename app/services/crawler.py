@@ -14,6 +14,21 @@ from bs4 import BeautifulSoup
 import aiohttp
 import asyncio
 
+# Add Brotli support for content-encoding
+try:
+    import brotli
+    BROTLI_AVAILABLE = True
+except ImportError:
+    BROTLI_AVAILABLE = False
+    logger.warning("Brotli not available - some websites may fail to load")
+
+# Default headers without brotli to avoid decode errors
+DEFAULT_HEADERS_NO_BROTLI = {
+    "User-Agent": "Mozilla/5.0 (crawler; +https://example.com/bot)",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Encoding": "gzip, deflate",  # Explicitly exclude brotli
+}
+
 from .cache import get_cached_result, cache_result
 from ..utils.constants import (
     DEFAULT_TIMEOUT, DEFAULT_USER_AGENT, DEFAULT_HEADERS
@@ -100,6 +115,9 @@ async def extract_with_requests(url: str) -> Dict:
                 # Get fresh headers for each attempt
                 headers = get_enhanced_headers(url)
                 
+                # Always disable brotli to avoid decode errors
+                headers['Accept-Encoding'] = 'gzip, deflate'
+                
                 # Create SSL context that ignores certificate verification
                 import ssl
                 ssl_context = ssl.create_default_context()
@@ -147,6 +165,16 @@ async def extract_with_requests(url: str) -> Dict:
                 if e.status in [403, 429, 503] and attempt < max_retries - 1:
                     logger.warning(f"⚠️ HTTP {e.status} for {url}, retrying... (attempt {attempt + 1}/{max_retries})")
                     await asyncio.sleep(1 + attempt)  # Giảm từ 2^attempt xuống 1+attempt
+                    continue
+                else:
+                    raise e
+            except aiohttp.http_exceptions.ContentEncodingError as e:
+                logger.warning(f"⚠️ Content encoding error for {url}: {e}")
+                if attempt < max_retries - 1:
+                    # Retry with explicit no-brotli headers
+                    logger.info(f"🔄 Retrying {url} with gzip/deflate only...")
+                    headers = DEFAULT_HEADERS_NO_BROTLI.copy()
+                    headers['Referer'] = url
                     continue
                 else:
                     raise e
@@ -258,8 +286,12 @@ async def crawl_single_url(url: str) -> Dict:
     # Debug logging
     logger.info(f"🔍 extract_with_requests result: success={result.get('success')} status={result.get('status_code')} url={result.get('url')} html_len={len(result.get('html', ''))}")
     
-    # Cache the result
-    cache_result(url, result)
+    # Only cache successful results with HTML content
+    if result.get('success') and result.get('html') and len(result.get('html', '')) > 500:
+        cache_result(url, result)
+        logger.info(f"💾 Cached successful result for {url}")
+    else:
+        logger.warning(f"⚠️ Skip caching failed/empty result for {url}")
     
     return result
 
