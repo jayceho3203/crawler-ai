@@ -19,5 +19,7 @@ services:
         value: "/opt/render/project/src"
       - key: USE_PLAYWRIGHT
         value: "1"
+      - key: PLAYWRIGHT_BROWSERS_PATH
+        value: "0"
     healthCheckPath: /health
     autoDeploy: true 

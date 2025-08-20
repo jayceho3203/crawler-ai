@@ -41,7 +41,10 @@ async def ensure_playwright_browsers():
         # Try to import and launch browser
         from playwright.async_api import async_playwright
         async with async_playwright() as p:
-            browser = await p.chromium.launch()
+            browser = await p.chromium.launch(
+            headless=True,
+            args=["--no-sandbox", "--disable-dev-shm-usage"]
+        )
             await browser.close()
         logger.info("✅ Playwright browsers already installed")
         return True
