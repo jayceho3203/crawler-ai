@@ -100,10 +100,14 @@ class CareerPagesService:
             
             # Step 5: Subdomain search (if enabled)
             if include_subdomain_search:
+                logger.info(f"   🔍 Starting subdomain search for: {url}")
                 subdomain_results = await self._search_subdomains(url, strict_filtering)
+                logger.info(f"   📊 Subdomain search results: {len(subdomain_results['career_pages'])} career pages, {len(subdomain_results['potential_pages'])} potential pages")
                 career_pages.extend(subdomain_results['career_pages'])
                 potential_career_pages.extend(subdomain_results['potential_pages'])
                 career_page_analysis.extend(subdomain_results['analysis'])
+            else:
+                logger.info(f"   ⚠️ Subdomain search disabled")
             
             # Step 6: Job board integration (if enabled)
             if include_job_boards:
@@ -297,6 +301,10 @@ class CareerPagesService:
         try:
             parsed = urlparse(base_url)
             domain = parsed.netloc
+            # Remove www. prefix for subdomain generation
+            if domain.startswith('www.'):
+                domain = domain[4:]
+            logger.info(f"   🔍 Parsed domain: {domain} (cleaned from {parsed.netloc})")
             
             # Common subdomain patterns for career pages
             subdomain_patterns = [
@@ -315,6 +323,9 @@ class CareerPagesService:
                 for career_pattern in ['/career', '/careers', '/jobs', '/tuyen-dung', '/viec-lam']:
                     subdomain_urls.append(f"https://{pattern}.{domain}{career_pattern}")
             
+            logger.info(f"   🔗 Generated {len(subdomain_urls)} subdomain URLs")
+            logger.info(f"   🔗 Sample URLs: {subdomain_urls[:3]}")
+            
             # Test subdomain URLs
             logger.info(f"   🔍 Testing {len(subdomain_urls)} subdomain URLs for {domain}")
             tasks = []
@@ -323,19 +334,17 @@ class CareerPagesService:
                 task = self._test_subdomain_url(subdomain_url, strict_filtering)
                 tasks.append(task)
             
-            # Add timeout for subdomain search
+            # Test subdomain URLs with timeout
             if tasks:
                 try:
                     results = await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), timeout=60)
+                    logger.info(f"   ✅ Subdomain search completed with {len(results)} results")
                 except asyncio.TimeoutError:
                     logger.warning(f"   ⚠️ Subdomain search timeout after 60s")
                     results = []
                 except Exception as e:
                     logger.error(f"   ❌ Subdomain search error: {e}")
                     results = []
-            
-            if tasks:
-                results = await asyncio.gather(*tasks, return_exceptions=True)
                 
                 for result in results:
                     if isinstance(result, dict) and result.get('success'):
@@ -353,13 +362,17 @@ class CareerPagesService:
     async def _test_subdomain_url(self, url: str, strict_filtering: bool) -> Dict:
         """Test if a subdomain URL is accessible and contains career content"""
         try:
+            logger.info(f"      🔗 Testing subdomain URL: {url}")
             result = await crawl_single_url(url)
             
             if result['success']:
+                logger.info(f"      ✅ Subdomain crawl successful: {url}")
                 analysis = await self._analyze_url_for_career(url, url, strict_filtering)
                 analysis['success'] = True
+                analysis['url'] = url
                 return analysis
             else:
+                logger.info(f"      ❌ Subdomain crawl failed: {url}")
                 return {
                     'url': url,
                     'success': False,
@@ -369,6 +382,7 @@ class CareerPagesService:
                 }
                 
         except Exception as e:
+            logger.error(f"      ❌ Subdomain crawl error for {url}: {e}")
             return {
                 'url': url,
                 'success': False,

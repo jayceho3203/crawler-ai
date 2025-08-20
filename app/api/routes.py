@@ -377,6 +377,8 @@ async def debug_html(request: JobDetailsRequest):
             'error_message': str(e)
         }
 
+
+
 @router.post("/batch_detect_career_pages")
 async def batch_detect_career_pages(request: BatchCareerPagesRequest):
     """Batch detect career pages from multiple URLs"""
