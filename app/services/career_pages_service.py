@@ -337,12 +337,16 @@ class CareerPagesService:
                     career_indicators.append(f"Exact career keyword: '{keyword}'")
                     analysis['confidence'] += 1.0  # Tăng từ 0.6 lên 1.0
             
-            # 2. Generic keywords (MEDIUM WEIGHT) - Tăng weight để dễ đạt 0.5
+            # 2. Generic keywords (MEDIUM WEIGHT) - Chỉ match từ riêng biệt, không match substring
             generic_keywords = ['dev', 'software', 'tech', 'ml', 'ai', 'testing', 'it', 'digital']
+            path_segments = path.strip('/').split('/')
             for keyword in generic_keywords:
-                if keyword in path:
+                # Chỉ match nếu keyword là một segment riêng biệt hoặc có dấu gạch ngang
+                if (f'/{keyword}' in path or f'{keyword}/' in path or 
+                    f'-{keyword}' in path or f'{keyword}-' in path or
+                    keyword in path_segments):
                     career_indicators.append(f"Path contains '{keyword}'")
-                    analysis['confidence'] += 0.3  # Tăng từ 0.1 lên 0.3
+                    analysis['confidence'] += 0.3
             
             # 3. Career patterns (HIGH WEIGHT) - EASIER TO REACH 0.5
             career_patterns = [
