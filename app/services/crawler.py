@@ -138,6 +138,17 @@ async def extract_with_requests(url: str) -> Dict:
     start_time = time.time()
     
     try:
+        # Skip non-HTTP URLs early (mailto:, tel:, javascript:, data:, anchors)
+        if not url.startswith(("http://", "https://")) or url.startswith(("mailto:", "tel:", "javascript:", "data:", "#")):
+            logger.info(f"⚠️ Skip non-HTTP URL: {url}")
+            return {
+                "success": False,
+                "error_message": "Non-HTTP URL skipped",
+                "error_type": "non_http",
+                "url": url,
+                "crawl_time": 0,
+                "crawl_method": "requests_optimized"
+            }
         # Add random delay to avoid rate limiting
         delay = get_random_delay()
         await asyncio.sleep(delay)

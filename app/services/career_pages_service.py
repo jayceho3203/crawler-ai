@@ -491,6 +491,10 @@ class CareerPagesService:
                 logger.info(f"   🔗 Testing subdomain: {subdomain_url}")
 
 
+
+
+
+
                 task = asyncio.create_task(limited_test_subdomain(subdomain_url))
                 tasks.append(task)
             

@@ -648,7 +648,7 @@ class OptimizedCareerSpider(scrapy.Spider):
             '/services/', '/service/', '/products/', '/product/',
             '/solutions/', '/solution/', '/portfolio/', '/about/',
             '/contact/', '/team/', '/company/', '/news/', '/blog/',
-            '/press/', '/media/', '/investor/', '/career/', '/careers/',
+            '/press/', '/media/', '/investor/',
             # Vietnamese equivalents
             '/dich-vu/', '/san-pham/', '/giai-phap/', '/gioi-thieu/',
             '/lien-he/', '/doi-ngu/', '/cong-ty/', '/tin-tuc/',
@@ -700,7 +700,7 @@ class OptimizedCareerSpider(scrapy.Spider):
         
         # URL should have some specificity (not just /career/)
         path_parts = url.split('/')
-        if len(path_parts) < 4:  # Too short, likely not a specific job
+        if len(path_parts) < 3:  # Too short, likely not a specific job (reduced from 4 to 3)
             return False
         
         return True

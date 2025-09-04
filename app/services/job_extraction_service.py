@@ -1061,7 +1061,6 @@ class JobExtractionService:
                     desc_text = main_content.get_text().strip()
                     if desc_text and len(desc_text) > 100:
                         # Clean up text - add spaces between words that are concatenated
-                        import re
                         # Add spaces between camelCase and PascalCase
                         desc_text = re.sub(r'([a-z])([A-Z])', r'\1 \2', desc_text)
                         # Add spaces between words and numbers
@@ -1080,7 +1079,6 @@ class JobExtractionService:
                         desc_text = body.get_text().strip()
                         if desc_text and len(desc_text) > 100:
                             # Clean up text - add spaces between words that are concatenated
-                            import re
                             # Add spaces between camelCase and PascalCase
                             desc_text = re.sub(r'([a-z])([A-Z])', r'\1 \2', desc_text)
                             # Add spaces between words and numbers
