@@ -20,7 +20,7 @@ try:
     BROTLI_AVAILABLE = True
 except ImportError:
     BROTLI_AVAILABLE = False
-    logger.warning("Brotli not available - some websites may fail to load")
+    # Note: logger will be defined later in the file
 
 # Default headers without brotli to avoid decode errors
 DEFAULT_HEADERS_NO_BROTLI = {
@@ -100,6 +100,39 @@ def get_enhanced_headers(url: str):
         **DEFAULT_HEADERS
     }
 
+async def check_url_availability(url: str, session: aiohttp.ClientSession, timeout: aiohttp.ClientTimeout) -> Dict:
+    """Check if URL is available using HEAD request first"""
+    try:
+        # Try HEAD request first (faster)
+        async with session.head(url, timeout=timeout, allow_redirects=True, ssl=False) as response:
+            if response.status in [200, 301, 302, 303, 307, 308]:
+                return {
+                    'available': True,
+                    'status': response.status,
+                    'method': 'HEAD'
+                }
+            elif response.status in [404, 410]:
+                return {
+                    'available': False,
+                    'status': response.status,
+                    'method': 'HEAD',
+                    'error': f'Permanent error: HTTP {response.status}'
+                }
+            else:
+                return {
+                    'available': False,
+                    'status': response.status,
+                    'method': 'HEAD',
+                    'error': f'HTTP {response.status} - {response.reason}'
+                }
+    except Exception as e:
+        # If HEAD fails, we'll try GET anyway
+        return {
+            'available': None,  # Unknown, try GET
+            'error': str(e),
+            'method': 'HEAD'
+        }
+
 async def extract_with_requests(url: str) -> Dict:
     """Primary method using aiohttp with enhanced filtering and anti-bot headers"""
     start_time = time.time()
@@ -110,9 +143,10 @@ async def extract_with_requests(url: str) -> Dict:
         await asyncio.sleep(delay)
         
         # Enhanced retry mechanism với exponential backoff
-        max_retries = 3  # Giảm từ 5 xuống 3
+        max_retries = 3
         html_content = None
         response = None
+        last_error = None
         
         for attempt in range(max_retries):
             try:
@@ -130,55 +164,83 @@ async def extract_with_requests(url: str) -> Dict:
                 
                 connector = aiohttp.TCPConnector(ssl=ssl_context)
                 
-                # Add timeout with exponential backoff (giảm timeout)
-                timeout = aiohttp.ClientTimeout(total=15 + (attempt * 5))  # Giảm từ 30+10 xuống 15+5
+                # Improved timeout configuration
+                timeout = aiohttp.ClientTimeout(
+                    total=20,  # Total timeout
+                    connect=10,  # Connection timeout
+                    sock_read=10  # Socket read timeout
+                )
                 
                 async with aiohttp.ClientSession(connector=connector) as session:
-                    async with session.get(url, headers=headers, timeout=timeout, allow_redirects=True) as response:
+                    # Check availability with HEAD request first (optional optimization)
+                    if attempt == 0:  # Only on first attempt
+                        availability = await check_url_availability(url, session, timeout)
+                        if availability['available'] is False:
+                            raise Exception(availability['error'])
+                        elif availability['available'] is True:
+                            logger.info(f"✅ URL available via HEAD: {url} (status: {availability['status']})")
+                    
+                    async with session.get(url, headers=headers, timeout=timeout, allow_redirects=True, ssl=False) as response:
                         
-                        # Handle different error status codes
+                        # Handle different error status codes with better classification
                         if response.status == 403:
+                            last_error = f"403 Forbidden - likely blocked by server"
                             if attempt < max_retries - 1:
-                                logger.warning(f"⚠️ 403 Forbidden for {url}, retrying... (attempt {attempt + 1}/{max_retries})")
-                                await asyncio.sleep(1 + attempt)  # Giảm từ 2^attempt xuống 1+attempt
+                                logger.warning(f"⚠️ {last_error} for {url}, retrying... (attempt {attempt + 1}/{max_retries})")
+                                await asyncio.sleep(2 ** attempt)  # Exponential backoff: 1s, 2s, 4s
                                 continue
                             else:
-                                raise Exception(f"403 Forbidden after {max_retries} attempts")
+                                raise Exception(last_error)
                         
                         elif response.status == 429:  # Rate limited
+                            last_error = f"429 Rate Limited - too many requests"
                             if attempt < max_retries - 1:
-                                logger.warning(f"⚠️ 429 Rate Limited for {url}, waiting longer... (attempt {attempt + 1}/{max_retries})")
-                                await asyncio.sleep(2 + (attempt * 2))  # Giảm từ 5+5 xuống 2+2
+                                logger.warning(f"⚠️ {last_error} for {url}, waiting longer... (attempt {attempt + 1}/{max_retries})")
+                                await asyncio.sleep(3 + (attempt * 2))  # Longer wait: 3s, 5s, 7s
                                 continue
                             else:
-                                raise Exception(f"429 Rate Limited after {max_retries} attempts")
+                                raise Exception(last_error)
                         
                         elif response.status == 503:  # Service unavailable
+                            last_error = f"503 Service Unavailable - server overloaded"
                             if attempt < max_retries - 1:
-                                logger.warning(f"⚠️ 503 Service Unavailable for {url}, retrying... (attempt {attempt + 1}/{max_retries})")
-                                await asyncio.sleep(1 + attempt)  # Giảm từ 3+2 xuống 1+attempt
+                                logger.warning(f"⚠️ {last_error} for {url}, retrying... (attempt {attempt + 1}/{max_retries})")
+                                await asyncio.sleep(2 + attempt)  # 2s, 3s, 4s
                                 continue
                             else:
-                                raise Exception(f"503 Service Unavailable after {max_retries} attempts")
+                                raise Exception(last_error)
+                        
+                        elif response.status >= 400:
+                            last_error = f"HTTP {response.status} - {response.reason}"
+                            if response.status in [404, 410]:  # Permanent errors
+                                raise Exception(f"Permanent error: {last_error}")
+                            elif attempt < max_retries - 1:
+                                logger.warning(f"⚠️ {last_error} for {url}, retrying... (attempt {attempt + 1}/{max_retries})")
+                                await asyncio.sleep(1 + attempt)
+                                continue
+                            else:
+                                raise Exception(last_error)
                         
                         response.raise_for_status()
                         html_content = await response.text()
                         break  # Thành công, thoát loop
                         
             except aiohttp.ClientResponseError as e:
+                last_error = f"HTTP {e.status} - {e.message}"
                 if e.status in [403, 429, 503] and attempt < max_retries - 1:
-                    logger.warning(f"⚠️ HTTP {e.status} for {url}, retrying... (attempt {attempt + 1}/{max_retries})")
+                    logger.warning(f"⚠️ {last_error} for {url}, retrying... (attempt {attempt + 1}/{max_retries})")
                     # Add jitter for 403 errors
                     if e.status == 403:
                         jitter = random.uniform(0.5, 1.5)
-                        await asyncio.sleep(jitter + attempt)
+                        await asyncio.sleep(jitter + (2 ** attempt))
                     else:
-                        await asyncio.sleep(1 + attempt)  # Giảm từ 2^attempt xuống 1+attempt
+                        await asyncio.sleep(2 ** attempt)
                     continue
                 else:
                     raise e
             except aiohttp.http_exceptions.ContentEncodingError as e:
-                logger.warning(f"⚠️ Content encoding error for {url}: {e}")
+                last_error = f"Content encoding error: {str(e)}"
+                logger.warning(f"⚠️ {last_error} for {url}")
                 if attempt < max_retries - 1:
                     # Retry with explicit no-brotli headers
                     logger.info(f"🔄 Retrying {url} with gzip/deflate only...")
@@ -188,15 +250,31 @@ async def extract_with_requests(url: str) -> Dict:
                 else:
                     raise e
             except asyncio.TimeoutError:
+                last_error = "Connection timeout"
                 if attempt < max_retries - 1:
-                    logger.warning(f"⚠️ Timeout for {url}, retrying... (attempt {attempt + 1}/{max_retries})")
-                    await asyncio.sleep(1 + attempt)  # Giảm từ 2^attempt xuống 1+attempt
+                    logger.warning(f"⚠️ {last_error} for {url}, retrying... (attempt {attempt + 1}/{max_retries})")
+                    await asyncio.sleep(2 ** attempt)  # Exponential backoff
                     continue
                 else:
-                    raise Exception(f"Timeout after {max_retries} attempts")
+                    raise Exception(f"{last_error} after {max_retries} attempts")
+            except aiohttp.ClientConnectorError as e:
+                last_error = f"Connection error: {str(e)}"
+                if "Name or service not known" in str(e):
+                    last_error = "DNS resolution failed - domain may not exist"
+                elif "Connection refused" in str(e):
+                    last_error = "Connection refused - server may be down"
+                elif "Network is unreachable" in str(e):
+                    last_error = "Network unreachable"
+                
+                if attempt < max_retries - 1:
+                    logger.warning(f"⚠️ {last_error} for {url}, retrying... (attempt {attempt + 1}/{max_retries})")
+                    await asyncio.sleep(2 ** attempt)
+                    continue
+                else:
+                    raise Exception(last_error)
         
         if html_content is None:
-            raise Exception("Failed to get HTML content after all retries")
+            raise Exception(f"Failed to get HTML content after {max_retries} attempts. Last error: {last_error}")
         
         # Extract emails using enhanced patterns
         logger.info(f"🔍 Processing HTML content (length: {len(html_content)})")
@@ -270,10 +348,36 @@ async def extract_with_requests(url: str) -> Dict:
                 
     except Exception as e:
         import traceback
-        logger.exception(f"❌ Requests failed for {url}")  # tự động in traceback
+        error_msg = str(e)
+        
+        # Classify error types for better logging
+        error_type = "unknown"
+        if any(err in error_msg.lower() for err in ['timeout', 'connection timeout']):
+            error_type = "timeout"
+            logger.warning(f"⏱️ Timeout error for {url}: {error_msg}")
+        elif any(err in error_msg.lower() for err in ['dns', 'name or service not known']):
+            error_type = "dns"
+            logger.warning(f"🌐 DNS error for {url}: {error_msg}")
+        elif any(err in error_msg.lower() for err in ['connection refused', 'unreachable']):
+            error_type = "connection"
+            logger.warning(f"🔌 Connection error for {url}: {error_msg}")
+        elif any(err in error_msg.lower() for err in ['403', 'forbidden', 'blocked']):
+            error_type = "blocked"
+            logger.warning(f"🚫 Blocked/Forbidden for {url}: {error_msg}")
+        elif any(err in error_msg.lower() for err in ['429', 'rate limited']):
+            error_type = "rate_limited"
+            logger.warning(f"⏳ Rate limited for {url}: {error_msg}")
+        elif any(err in error_msg.lower() for err in ['404', 'not found', '410', 'gone']):
+            error_type = "not_found"
+            logger.warning(f"❓ Not found for {url}: {error_msg}")
+        else:
+            error_type = "other"
+            logger.exception(f"❌ Unexpected error for {url}: {error_msg}")
+            
         return {
             "success": False,
-            "error_message": str(e),
+            "error_message": error_msg,
+            "error_type": error_type,
             "url": url,
             "crawl_time": time.time() - start_time,
             "crawl_method": "requests_optimized"

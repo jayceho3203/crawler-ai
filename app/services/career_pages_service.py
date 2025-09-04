@@ -489,7 +489,7 @@ class CareerPagesService:
             tasks = []
             for subdomain_url in subdomain_urls:
                 logger.info(f"   🔗 Testing subdomain: {subdomain_url}")
-                task = limited_test_subdomain(subdomain_url)
+                task = asyncio.create_task(limited_test_subdomain(subdomain_url))
                 tasks.append(task)
             
             # Test subdomain URLs with improved timeout handling
@@ -930,7 +930,8 @@ class CareerPagesService:
                 async with sem:
                     return await self._validate_host_alive(host)
             
-            tasks = [limited_validate(h) for h in candidates]
+            # Create tasks explicitly to avoid coroutine error
+            tasks = [asyncio.create_task(limited_validate(h)) for h in candidates]
             
             # Use asyncio.wait with timeout
             done, pending = await asyncio.wait(tasks, timeout=self.GLOBAL_TIMEOUT)
@@ -953,27 +954,20 @@ class CareerPagesService:
             
         except Exception as e:
             logger.error(f"   ❌ Dynamic discovery error: {e}")
+            # Don't re-raise the exception, just return empty list
+            # This prevents the entire career page detection from failing
         
         return alive_urls
     
     async def _validate_host_alive(self, host: str) -> Dict:
         """
-        Validate if host is alive (DNS + HTTP)
+        Validate if host is alive (DNS + HTTP) with timeout
         """
         try:
-            # Simple validation using existing crawl_single_url
-            url = f"https://{host}"
-            result = await crawl_single_url(url)
-            
-            if result and result.get('success'):
-                return {
-                    'alive': True,
-                    'url': url,
-                    'host': host
-                }
-            else:
-                # Try HTTP as fallback
-                url = f"http://{host}"
+            # Add timeout wrapper to prevent hanging
+            async def validate_with_timeout():
+                # Simple validation using existing crawl_single_url
+                url = f"https://{host}"
                 result = await crawl_single_url(url)
                 
                 if result and result.get('success'):
@@ -982,13 +976,36 @@ class CareerPagesService:
                         'url': url,
                         'host': host
                     }
+                else:
+                    # Try HTTP as fallback
+                    url = f"http://{host}"
+                    result = await crawl_single_url(url)
+                    
+                    if result and result.get('success'):
+                        return {
+                            'alive': True,
+                            'url': url,
+                            'host': host
+                        }
+                
+                return {
+                    'alive': False,
+                    'url': url,
+                    'host': host
+                }
             
+            # Use asyncio.wait_for with timeout
+            result = await asyncio.wait_for(validate_with_timeout(), timeout=10.0)
+            return result
+            
+        except asyncio.TimeoutError:
+            logger.warning(f"      ⚠️ Host validation timeout for {host}")
             return {
                 'alive': False,
-                'url': url,
-                'host': host
+                'url': f"https://{host}",
+                'host': host,
+                'error': 'timeout'
             }
-            
         except Exception as e:
             logger.warning(f"      ⚠️ Host validation failed for {host}: {e}")
             return {
