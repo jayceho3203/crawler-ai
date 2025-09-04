@@ -12,6 +12,7 @@ import os
 import tempfile
 from datetime import datetime
 from typing import Dict, List
+from urllib.parse import urljoin, urlparse
 from scrapy.crawler import CrawlerProcess
 from scrapy.utils.project import get_project_settings
 from scrapy.settings import Settings
@@ -214,7 +215,7 @@ class OptimizedCareerSpider(scrapy.Spider):
     
     def is_valid_link(self, link: str) -> bool:
         """
-        Kiểm tra link có hợp lệ không
+        Kiểm tra link có hợp lệ không với strict filtering
         """
         if not link or link.startswith(('#', 'javascript:', 'mailto:', 'tel:')):
             return False
@@ -222,6 +223,36 @@ class OptimizedCareerSpider(scrapy.Spider):
         # Loại bỏ external links
         if link.startswith('http') and self.domain not in link:
             return False
+        
+        # STRICT FILTERING: Exclude common non-job URLs
+        link_lower = link.lower()
+        non_job_patterns = [
+            # External services
+            'google.com/maps', 'facebook.com', 'twitter.com', 'linkedin.com',
+            'youtube.com', 'instagram.com', 'tiktok.com',
+            # Company pages
+            '/services/', '/service/', '/products/', '/product/',
+            '/solutions/', '/solution/', '/portfolio/', '/about/',
+            '/contact/', '/team/', '/company/', '/news/', '/blog/',
+            '/press/', '/media/', '/investor/',
+            # Vietnamese equivalents
+            '/dich-vu/', '/san-pham/', '/giai-phap/', '/gioi-thieu/',
+            '/lien-he/', '/doi-ngu/', '/cong-ty/', '/tin-tuc/',
+            '/bai-viet/', '/thong-cao/', '/truyen-thong/',
+            # Other common patterns
+            '/privacy/', '/terms/', '/cookie/', '/sitemap/',
+            '/search/', '/login/', '/register/', '/signup/',
+            '/admin/', '/dashboard/', '/account/', '/profile/',
+            # File extensions
+            '.jpg', '.jpeg', '.png', '.gif', '.svg', '.ico',
+            '.css', '.js', '.woff', '.woff2', '.ttf', '.eot',
+            '.xml', '.json', '.pdf', '.doc', '.docx'
+        ]
+        
+        # If link contains any non-job pattern, reject it
+        for pattern in non_job_patterns:
+            if pattern in link_lower:
+                return False
             
         return True
     
@@ -325,19 +356,23 @@ class OptimizedCareerSpider(scrapy.Spider):
             career_score = self.calculate_career_score(response)
             
             if career_score >= 0.3:  # Lower threshold to find more career pages
+                # Extract job URLs from this career page
+                job_urls = self.extract_job_urls_from_career_page(response)
+                
                 career_page = {
                     'url': response.url,
                     'title': response.css('title::text').get() or '',
                     'confidence': career_score,
                     'indicators': self.get_career_indicators(response),
                     'priority_found': priority,
-                    'contact_info': contact_info  # Include contact info for this career page
+                    'contact_info': contact_info,  # Include contact info for this career page
+                    'job_urls': job_urls  # Include extracted job URLs
                 }
                 
                 self.career_pages.append(career_page)
                 self.found_career_pages += 1
                 
-                logger.info(f"🎯 Career listing page found: {response.url} (score: {career_score:.2f})")
+                logger.info(f"🎯 Career listing page found: {response.url} (score: {career_score:.2f}) with {len(job_urls)} job URLs")
         
         # Tăng crawled_pages sau khi xử lý
         self.crawled_pages += 1
@@ -550,6 +585,125 @@ class OptimizedCareerSpider(scrapy.Spider):
             logger.error(f"❌ Error saving result: {e}")
         
         return result
+
+    def extract_job_urls_from_career_page(self, response) -> List[str]:
+        """
+        Extract job URLs from career page with strict filtering
+        """
+        job_urls = []
+        url = response.url
+        
+        # Find all links on the career page
+        links = response.css('a[href]::attr(href)').getall()
+        
+        for link in links:
+            if not link:
+                continue
+                
+            # Normalize URL
+            full_url = response.urljoin(link)
+            
+            # Apply strict job URL filtering
+            if self._is_job_url(full_url):
+                job_urls.append(full_url)
+                logger.info(f"   🔗 Found job URL: {full_url}")
+        
+        # Remove duplicates and return
+        unique_job_urls = list(set(job_urls))
+        logger.info(f"   📊 Total job URLs found: {len(unique_job_urls)}")
+        
+        return unique_job_urls
+    
+    def _is_job_url(self, url: str) -> bool:
+        """
+        Check if URL is a job detail page with strict filtering
+        """
+        url_lower = url.lower()
+        
+        # Skip URLs that are likely to be 404 or invalid
+        skip_patterns = [
+            'javascript:', 'mailto:', 'tel:', '#', 
+            'void(0)', 'undefined', 'null'
+        ]
+        
+        for pattern in skip_patterns:
+            if pattern in url_lower:
+                return False
+        
+        # Skip sitemap and other non-job files
+        skip_files = ['sitemap.xml', 'robots.txt', '.xml', '.json', '.pdf', '.doc', '.docx']
+        if any(file_ext in url_lower for file_ext in skip_files):
+            return False
+        
+        # Must be a valid HTTP URL
+        if not url.startswith(('http://', 'https://')):
+            return False
+        
+        # STRICT FILTERING: Exclude common non-job URLs
+        non_job_patterns = [
+            # External services
+            'google.com/maps', 'facebook.com', 'twitter.com', 'linkedin.com',
+            'youtube.com', 'instagram.com', 'tiktok.com',
+            # Company pages
+            '/services/', '/service/', '/products/', '/product/',
+            '/solutions/', '/solution/', '/portfolio/', '/about/',
+            '/contact/', '/team/', '/company/', '/news/', '/blog/',
+            '/press/', '/media/', '/investor/', '/career/', '/careers/',
+            # Vietnamese equivalents
+            '/dich-vu/', '/san-pham/', '/giai-phap/', '/gioi-thieu/',
+            '/lien-he/', '/doi-ngu/', '/cong-ty/', '/tin-tuc/',
+            '/bai-viet/', '/thong-cao/', '/truyen-thong/',
+            # Other common patterns
+            '/privacy/', '/terms/', '/cookie/', '/sitemap/',
+            '/search/', '/login/', '/register/', '/signup/',
+            '/admin/', '/dashboard/', '/account/', '/profile/',
+            # File extensions
+            '.jpg', '.jpeg', '.png', '.gif', '.svg', '.ico',
+            '.css', '.js', '.woff', '.woff2', '.ttf', '.eot'
+        ]
+        
+        # If URL contains any non-job pattern, reject it
+        for pattern in non_job_patterns:
+            if pattern in url_lower:
+                return False
+        
+        # Check for job indicators (must be present)
+        job_indicators = [
+            # English patterns
+            '/career/', '/job/', '/position/', '/vacancy/',
+            '/opportunity/', '/opening/', '/apply/',
+            '/recruitment/', '/employment/', '/hiring/',
+            # Vietnamese patterns  
+            '/tuyen-dung/', '/viec-lam/', '/co-hoi/',
+            '/nhan-vien/', '/ung-vien/', '/cong-viec/',
+            '/lam-viec/', '/thu-viec/', '/chinh-thuc/',
+            '/nghe-nghiep/', '/tim-viec/', '/dang-tuyen/',
+            # Job-specific patterns
+            '/developer/', '/engineer/', '/analyst/', '/manager/',
+            '/specialist/', '/consultant/', '/coordinator/',
+            '/assistant/', '/director/', '/lead/', '/senior/',
+            '/junior/', '/intern/', '/trainee/', '/graduate/',
+            '/remote/', '/hybrid/', '/full-time/', '/part-time/',
+            '/contract/', '/freelance/', '/temporary/'
+        ]
+        
+        # Must have at least one job indicator
+        has_job_indicator = any(indicator in url_lower for indicator in job_indicators)
+        
+        if not has_job_indicator:
+            return False
+        
+        # Additional validation: URL should not be too generic
+        # Reject URLs that are just the career page itself
+        if url_lower.endswith('/career') or url_lower.endswith('/careers') or url_lower.endswith('/jobs'):
+            return False
+        
+        # URL should have some specificity (not just /career/)
+        path_parts = url.split('/')
+        if len(path_parts) < 4:  # Too short, likely not a specific job
+            return False
+        
+        return True
 
     def extract_contact_info(self, response) -> Dict:
         """

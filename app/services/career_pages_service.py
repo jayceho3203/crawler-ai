@@ -489,6 +489,8 @@ class CareerPagesService:
             tasks = []
             for subdomain_url in subdomain_urls:
                 logger.info(f"   🔗 Testing subdomain: {subdomain_url}")
+
+
                 task = asyncio.create_task(limited_test_subdomain(subdomain_url))
                 tasks.append(task)
             
@@ -710,6 +712,7 @@ class CareerPagesService:
             # Convert career_pages to URL list for API compatibility
             career_pages = []
             career_page_analysis = []
+            all_job_urls = []  # Collect all job URLs from career pages
             
             for page_data in career_pages_raw:
                 if isinstance(page_data, dict):
@@ -718,6 +721,12 @@ class CareerPagesService:
                     if page_url:
                         career_pages.append(page_url)
                         
+                        # Extract job URLs from this career page
+                        job_urls = page_data.get('job_urls', [])
+                        if job_urls:
+                            all_job_urls.extend(job_urls)
+                            logger.info(f"   🔗 Career page {page_url} has {len(job_urls)} job URLs")
+                        
                         # Create analysis from dict data
                         analysis = {
                             'url': page_url,
@@ -725,7 +734,8 @@ class CareerPagesService:
                             'is_potential': False,
                             'confidence': page_data.get('confidence', 0.8),
                             'rejection_reason': None,
-                            'indicators': page_data.get('indicators', ['Scrapy spider detected'])
+                            'indicators': page_data.get('indicators', ['Scrapy spider detected']),
+                            'job_urls': job_urls
                         }
                         career_page_analysis.append(analysis)
                 elif isinstance(page_data, str):
@@ -737,9 +747,14 @@ class CareerPagesService:
                         'is_potential': False,
                         'confidence': 0.8,
                         'rejection_reason': None,
-                        'indicators': ['Scrapy spider detected']
+                        'indicators': ['Scrapy spider detected'],
+                        'job_urls': []
                     }
                     career_page_analysis.append(analysis)
+            
+            # Remove duplicate job URLs
+            unique_job_urls = list(set(all_job_urls))
+            logger.info(f"   📊 Total unique job URLs found: {len(unique_job_urls)}")
             
             potential_career_pages = []
             rejected_urls = []
@@ -762,7 +777,9 @@ class CareerPagesService:
                 'valid_career_pages': len(career_pages),
                 'confidence_score': confidence_score,
                 'crawl_time': (datetime.now() - start_time).total_seconds(),
-                'crawl_method': 'scrapy_optimized'
+                'crawl_method': 'scrapy_optimized',
+                'job_urls': unique_job_urls,  # Include filtered job URLs
+                'total_jobs_found': len(unique_job_urls)
             }
             
         except Exception as e:

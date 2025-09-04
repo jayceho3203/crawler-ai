@@ -354,37 +354,93 @@ class JobExtractionService:
             return False
     
     def _is_job_url(self, url: str) -> bool:
-        """Check if URL is a job detail page"""
-        # Skip URLs that are likely to be 404
+        """Check if URL is a job detail page with strict filtering"""
+        url_lower = url.lower()
+        
+        # Skip URLs that are likely to be 404 or invalid
         skip_patterns = [
             'javascript:', 'mailto:', 'tel:', '#', 
             'void(0)', 'undefined', 'null'
         ]
         
         for pattern in skip_patterns:
-            if pattern in url.lower():
+            if pattern in url_lower:
                 return False
         
         # Skip sitemap and other non-job files
         skip_files = ['sitemap.xml', 'robots.txt', '.xml', '.json', '.pdf', '.doc', '.docx']
-        if any(file_ext in url.lower() for file_ext in skip_files):
+        if any(file_ext in url_lower for file_ext in skip_files):
             return False
         
         # Must be a valid HTTP URL
         if not self._is_http_url(url):
             return False
         
-        # Check for job indicators
+        # STRICT FILTERING: Exclude common non-job URLs
+        non_job_patterns = [
+            # External services
+            'google.com/maps', 'facebook.com', 'twitter.com', 'linkedin.com',
+            'youtube.com', 'instagram.com', 'tiktok.com',
+            # Company pages
+            '/services/', '/service/', '/products/', '/product/',
+            '/solutions/', '/solution/', '/portfolio/', '/about/',
+            '/contact/', '/team/', '/company/', '/news/', '/blog/',
+            '/press/', '/media/', '/investor/', '/career/', '/careers/',
+            # Vietnamese equivalents
+            '/dich-vu/', '/san-pham/', '/giai-phap/', '/gioi-thieu/',
+            '/lien-he/', '/doi-ngu/', '/cong-ty/', '/tin-tuc/',
+            '/bai-viet/', '/thong-cao/', '/truyen-thong/',
+            # Other common patterns
+            '/privacy/', '/terms/', '/cookie/', '/sitemap/',
+            '/search/', '/login/', '/register/', '/signup/',
+            '/admin/', '/dashboard/', '/account/', '/profile/',
+            # File extensions
+            '.jpg', '.jpeg', '.png', '.gif', '.svg', '.ico',
+            '.css', '.js', '.woff', '.woff2', '.ttf', '.eot'
+        ]
+        
+        # If URL contains any non-job pattern, reject it
+        for pattern in non_job_patterns:
+            if pattern in url_lower:
+                return False
+        
+        # Check for job indicators (must be present)
         job_indicators = [
+            # English patterns
             '/career/', '/job/', '/position/', '/vacancy/',
+            '/opportunity/', '/opening/', '/apply/',
+            '/recruitment/', '/employment/', '/hiring/',
+            # Vietnamese patterns  
             '/tuyen-dung/', '/viec-lam/', '/co-hoi/',
-            '/opportunity/', '/opening/', '/apply/'
+            '/nhan-vien/', '/ung-vien/', '/cong-viec/',
+            '/lam-viec/', '/thu-viec/', '/chinh-thuc/',
+            '/nghe-nghiep/', '/tim-viec/', '/dang-tuyen/',
+            # Job-specific patterns
+            '/developer/', '/engineer/', '/analyst/', '/manager/',
+            '/specialist/', '/consultant/', '/coordinator/',
+            '/assistant/', '/director/', '/lead/', '/senior/',
+            '/junior/', '/intern/', '/trainee/', '/graduate/',
+            '/remote/', '/hybrid/', '/full-time/', '/part-time/',
+            '/contract/', '/freelance/', '/temporary/'
         ]
         
         # Must have at least one job indicator
-        has_job_indicator = any(indicator in url.lower() for indicator in job_indicators)
+        has_job_indicator = any(indicator in url_lower for indicator in job_indicators)
         
-        return has_job_indicator
+        if not has_job_indicator:
+            return False
+        
+        # Additional validation: URL should not be too generic
+        # Reject URLs that are just the career page itself
+        if url_lower.endswith('/career') or url_lower.endswith('/careers') or url_lower.endswith('/jobs'):
+            return False
+        
+        # URL should have some specificity (not just /career/)
+        path_parts = url.split('/')
+        if len(path_parts) < 4:  # Too short, likely not a specific job
+            return False
+        
+        return True
     
     def _is_pagination_url(self, url: str) -> bool:
         """Check if URL is a pagination page"""
@@ -1295,19 +1351,9 @@ class JobExtractionService:
                 for pattern in job_link_patterns:
                     if re.search(pattern, href, re.IGNORECASE):
                         full_url = urljoin(career_page_url, href)
-                        # Filter out the career page itself and ensure it's a job detail page
-                        if (full_url not in job_urls and 
-                            full_url != career_page_url and 
-                            not full_url.endswith('/career') and
-                            not full_url.endswith('/careers') and
-                            not full_url.endswith('/jobs') and
-                            not full_url.endswith('/positions') and
-                            # Filter out AJAX load URLs
-                            not '/load/' in full_url and
-                            # Filter out product pages
-                            not '/product' in full_url and
-                            # Filter out hash fragments
-                            not '#' in full_url):
+                        
+                        # Use strict job URL validation
+                        if self._is_job_url(full_url) and full_url not in job_urls:
                             job_urls.append(full_url)
                             logger.info(f"   🔗 Found job URL: {full_url}")
                 
