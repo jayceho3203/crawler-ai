@@ -1390,12 +1390,9 @@ class JobExtractionService:
                 ]
                 if any(keyword in link_text for keyword in job_keywords):
                     full_url = urljoin(career_page_url, href)
-                    if (full_url not in job_urls and 
-                        full_url != career_page_url and
-                        not full_url.endswith('/career') and
-                        not full_url.endswith('/careers') and
-                        not full_url.endswith('/jobs') and
-                        not full_url.endswith('/positions')):
+                    
+                    # Use strict job URL validation
+                    if self._is_job_url(full_url) and full_url not in job_urls:
                         job_urls.append(full_url)
                         logger.info(f"   🔗 Found job URL by keyword: {full_url}")
             
