@@ -413,6 +413,89 @@ async def debug_html(request: JobDetailsRequest):
             'error_message': str(e)
         }
 
+@router.post("/debug_job_extraction")
+async def debug_job_extraction(request: JobDetailsRequest):
+    """Debug endpoint to test job extraction logic"""
+    try:
+        from ..services.crawler import crawl_single_url
+        from bs4 import BeautifulSoup
+        import re
+        
+        result = await crawl_single_url(request.url)
+        
+        if not result['success']:
+            return {
+                'success': False,
+                'error': 'Failed to crawl page'
+            }
+        
+        html_content = result.get('html', '')
+        soup = BeautifulSoup(html_content, 'html.parser')
+        
+        # Test title extraction
+        title_selectors = [
+            'h1', 'h2', 'h3', '.job-title', '.position-title', '.title',
+            '.career-title', '.vacancy-title', '.opening-title'
+        ]
+        
+        found_titles = []
+        for selector in title_selectors:
+            elements = soup.select(selector)
+            for element in elements:
+                text = element.get_text().strip()
+                if text and len(text) > 3:
+                    found_titles.append({
+                        'selector': selector,
+                        'text': text,
+                        'length': len(text)
+                    })
+        
+        # Test description extraction
+        desc_selectors = [
+            '.job-description', '.description', '.content', '.job-content',
+            'article', '.main-content', '.job-details'
+        ]
+        
+        found_descriptions = []
+        for selector in desc_selectors:
+            elements = soup.select(selector)
+            for element in elements:
+                text = element.get_text().strip()
+                if text and len(text) > 50:
+                    found_descriptions.append({
+                        'selector': selector,
+                        'text': text[:200] + '...' if len(text) > 200 else text,
+                        'length': len(text)
+                    })
+        
+        # Test fallback extraction
+        fallback_text = ''
+        for element in soup(['script', 'style', 'nav', 'header', 'footer', 'aside']):
+            element.decompose()
+        
+        main_content = soup.find('main') or soup.find('article') or soup.find('body')
+        if main_content:
+            fallback_text = main_content.get_text().strip()
+            if len(fallback_text) > 200:
+                fallback_text = fallback_text[:200] + '...'
+        
+        return {
+            'success': True,
+            'url': request.url,
+            'html_length': len(html_content),
+            'found_titles': found_titles,
+            'found_descriptions': found_descriptions,
+            'fallback_text': fallback_text,
+            'fallback_length': len(main_content.get_text().strip()) if main_content else 0
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in debug job extraction: {e}")
+        return {
+            'success': False,
+            'error': str(e)
+        }
+
 
 
 @router.post("/batch_detect_career_pages")

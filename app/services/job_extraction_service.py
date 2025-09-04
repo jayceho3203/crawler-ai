@@ -1015,6 +1015,16 @@ class JobExtractionService:
                 '.job-responsibilities', '.position-responsibilities', '.career-responsibilities',
                 # Generic content selectors
                 '.content-area', '.main', '#main', '.container', '.wrapper',
+                # ICTS specific selectors
+                '.career-content', '.job-content', '.position-content',
+                '.career-detail', '.job-detail', '.position-detail',
+                '.career-info', '.job-info', '.position-info',
+                '.career-body', '.job-body', '.position-body',
+                '.career-section', '.job-section', '.position-section',
+                '.career-article', '.job-article', '.position-article',
+                '.career-text', '.job-text', '.position-text',
+                '.career-main', '.job-main', '.position-main',
+                '.career-wrapper', '.job-wrapper', '.position-wrapper',
                 '.text-content', '.body-content', '.page-body'
             ]
             for selector in desc_selectors:
@@ -1035,6 +1045,52 @@ class JobExtractionService:
             # Set job_role same as job_name for Wehappi
             if job_details['job_name']:
                 job_details['job_role'] = job_details['job_name']
+            
+            # Fallback: If no description found, try to extract from main content
+            if not job_details['job_description']:
+                logger.info("   🔄 No description found with selectors, trying fallback extraction")
+                
+                # Remove script, style, nav, header, footer elements
+                for element in soup(['script', 'style', 'nav', 'header', 'footer', 'aside']):
+                    element.decompose()
+                
+                # Try to find main content area
+                main_content = soup.find('main') or soup.find('article') or soup.find('div', class_=re.compile(r'main|content|body'))
+                
+                if main_content:
+                    desc_text = main_content.get_text().strip()
+                    if desc_text and len(desc_text) > 100:
+                        # Clean up text - add spaces between words that are concatenated
+                        import re
+                        # Add spaces between camelCase and PascalCase
+                        desc_text = re.sub(r'([a-z])([A-Z])', r'\1 \2', desc_text)
+                        # Add spaces between words and numbers
+                        desc_text = re.sub(r'([a-zA-Z])(\d)', r'\1 \2', desc_text)
+                        desc_text = re.sub(r'(\d)([a-zA-Z])', r'\1 \2', desc_text)
+                        # Clean up multiple spaces
+                        desc_text = re.sub(r'\s+', ' ', desc_text)
+                        
+                        job_details['job_description'] = desc_text[:2000]
+                        logger.info(f"   📄 Found description via fallback (length: {len(desc_text)})")
+                
+                # Final fallback: extract from body
+                if not job_details['job_description']:
+                    body = soup.find('body')
+                    if body:
+                        desc_text = body.get_text().strip()
+                        if desc_text and len(desc_text) > 100:
+                            # Clean up text - add spaces between words that are concatenated
+                            import re
+                            # Add spaces between camelCase and PascalCase
+                            desc_text = re.sub(r'([a-z])([A-Z])', r'\1 \2', desc_text)
+                            # Add spaces between words and numbers
+                            desc_text = re.sub(r'([a-zA-Z])(\d)', r'\1 \2', desc_text)
+                            desc_text = re.sub(r'(\d)([a-zA-Z])', r'\1 \2', desc_text)
+                            # Clean up multiple spaces
+                            desc_text = re.sub(r'\s+', ' ', desc_text)
+                            
+                            job_details['job_description'] = desc_text[:2000]
+                            logger.info(f"   📄 Found description via body fallback (length: {len(desc_text)})")
             
             # Debug logging for Wehappi fields
             logger.info(f"🔍 Job extraction debug (Wehappi fields):")
