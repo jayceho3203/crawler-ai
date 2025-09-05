@@ -699,8 +699,15 @@ class CareerPagesService:
         try:
             logger.info(f"🚀 Running optimized Scrapy spider for: {url}")
             
-            # Run Scrapy spider using new runner
-            result = await run_spider(url, max_pages)
+            # Run Scrapy spider using new runner (increased max_pages for better coverage)
+            scrapy_result = await run_spider(url, max_pages * 2)  # Double the pages for better career page detection
+            
+            # Always run requests-based fallback for comprehensive detection
+            logger.info(f"🔄 Running requests-based fallback for comprehensive detection")
+            requests_result = await self._detect_career_pages_requests_fallback(url, max_pages)
+            
+            # Merge results from both methods
+            result = self._merge_detection_results(scrapy_result, requests_result)
             
             # Debug log
             logger.info(f"🔍 Scrapy result type: {type(result)}")
@@ -1087,4 +1094,129 @@ class CareerPagesService:
         urls = [f"https://{t}.{domain}" for t in career_subdomains]
         
         logger.info(f"   🔧 Using fallback patterns: {career_subdomains}")
-        return urls 
+        return urls
+    
+    async def _detect_career_pages_requests_fallback(self, url: str, max_pages: int) -> Dict:
+        """
+        Fallback career page detection using requests when Scrapy fails
+        """
+        try:
+            logger.info(f"🔄 Using requests-based fallback for: {url}")
+            
+            # Use existing requests-based logic
+            from .crawler import crawl_single_url
+            result = await crawl_single_url(url)
+            
+            if not result['success']:
+                return {
+                    'success': False,
+                    'error_message': 'Failed to crawl with requests fallback',
+                    'requested_url': url,
+                    'crawl_time': 0,
+                    'crawl_method': 'requests_fallback'
+                }
+            
+            # Extract links from HTML
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(result['html'], 'html.parser')
+            
+            # Find career-related links
+            career_links = []
+            all_links = soup.find_all('a', href=True)
+            
+            career_keywords = ['career', 'careers', 'job', 'jobs', 'tuyen-dung', 'viec-lam']
+            
+            for link in all_links:
+                href = link.get('href', '').lower()
+                text = link.get_text().lower()
+                
+                if any(keyword in href or keyword in text for keyword in career_keywords):
+                    from urllib.parse import urljoin
+                    full_url = urljoin(result['url'], href)
+                    career_links.append(full_url)
+            
+            # Return result in same format as Scrapy
+            return {
+                'success': True,
+                'requested_url': url,
+                'career_pages': career_links,
+                'total_pages_crawled': 1,
+                'career_pages_found': len(career_links),
+                'crawl_time': 0,
+                'crawl_method': 'requests_fallback',
+                'contact_info': {
+                    'emails': [],
+                    'phones': [],
+                    'contact_urls': []
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Error in requests fallback: {e}")
+            return {
+                'success': False,
+                'error_message': str(e),
+                'requested_url': url,
+                'crawl_time': 0,
+                'crawl_method': 'requests_fallback'
+            }
+    
+    def _merge_detection_results(self, scrapy_result: Dict, requests_result: Dict) -> Dict:
+        """
+        Merge results from Scrapy and requests-based detection
+        """
+        try:
+            # Extract career pages from both results
+            scrapy_pages = scrapy_result.get('career_pages', [])
+            requests_pages = requests_result.get('career_pages', [])
+            
+            # Merge and deduplicate career pages
+            all_pages = scrapy_pages + requests_pages
+            unique_pages = list(set(all_pages))  # Remove duplicates
+            
+            # Merge contact info
+            scrapy_contact = scrapy_result.get('contact_info', {})
+            requests_contact = requests_result.get('contact_info', {})
+            
+            merged_contact = {
+                'emails': list(set(scrapy_contact.get('emails', []) + requests_contact.get('emails', []))),
+                'phones': list(set(scrapy_contact.get('phones', []) + requests_contact.get('phones', []))),
+                'contact_urls': list(set(scrapy_contact.get('contact_urls', []) + requests_contact.get('contact_urls', [])))
+            }
+            
+            # Calculate combined stats
+            total_pages_crawled = scrapy_result.get('total_pages_crawled', 0) + requests_result.get('total_pages_crawled', 0)
+            total_crawl_time = scrapy_result.get('crawl_time', 0) + requests_result.get('crawl_time', 0)
+            
+            # Determine primary method
+            primary_method = 'scrapy_optimized' if scrapy_result.get('total_pages_crawled', 0) > 0 else 'requests_fallback'
+            
+            logger.info(f"🔗 Merged results: {len(scrapy_pages)} Scrapy + {len(requests_pages)} requests = {len(unique_pages)} unique pages")
+            
+            return {
+                'success': True,
+                'requested_url': scrapy_result.get('requested_url', requests_result.get('requested_url', '')),
+                'career_pages': unique_pages,
+                'total_pages_crawled': total_pages_crawled,
+                'career_pages_found': len(unique_pages),
+                'crawl_time': total_crawl_time,
+                'crawl_method': f'{primary_method}_merged',
+                'contact_info': merged_contact,
+                'detection_methods': {
+                    'scrapy': {
+                        'pages_found': len(scrapy_pages),
+                        'pages_crawled': scrapy_result.get('total_pages_crawled', 0),
+                        'success': scrapy_result.get('success', False)
+                    },
+                    'requests': {
+                        'pages_found': len(requests_pages),
+                        'pages_crawled': requests_result.get('total_pages_crawled', 0),
+                        'success': requests_result.get('success', False)
+                    }
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Error merging detection results: {e}")
+            # Fallback to requests result if merging fails
+            return requests_result 

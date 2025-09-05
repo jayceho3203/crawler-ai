@@ -256,20 +256,26 @@ async def extract_job_urls(request: JobUrlsRequest):
 
 class JobDetailsRequest(BaseModel):
     url: str
+    job_index: int = None  # Optional job index for career pages
 
 @router.post("/extract_job_details", response_model=dict)
 async def extract_job_details(request: JobDetailsRequest):
     """
     Extract detailed job information from a single job URL
+    For career pages, job_index specifies which job to extract (1-based)
     """
     try:
         job_url = request.url
+        job_index = request.job_index
         
         logger.info(f"📄 Extracting job details from: {job_url}")
+        if job_index:
+            logger.info(f"   🎯 Job index: {job_index}")
         
         # Extract job details
         result = await job_extraction_service.extract_job_details_only(
-            job_url=job_url
+            job_url=job_url,
+            job_index=job_index
         )
         
         # Get job details with new field names
@@ -278,6 +284,7 @@ async def extract_job_details(request: JobDetailsRequest):
         return {
             'success': True,
             'job_url': job_url,
+            'job_index': job_index,
             'job_name': job_details.get('job_name', ''),
             'job_type': job_details.get('job_type', 'Full-time'),
             'job_role': job_details.get('job_role', ''),
@@ -292,6 +299,7 @@ async def extract_job_details(request: JobDetailsRequest):
         return {
             'success': False,
             'job_url': request.url,
+            'job_index': request.job_index,
             'error_message': str(e),
             'job_name': '',
             'job_type': 'Full-time',

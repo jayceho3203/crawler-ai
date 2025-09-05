@@ -12,15 +12,15 @@ from typing import Dict
 
 logger = logging.getLogger(__name__)
 
-def _run_spider_blocking(start_url: str, max_pages: int = 50) -> dict:
+def _run_spider_blocking(start_url: str, max_pages: int = 100) -> dict:
     """Run Scrapy spider in blocking mode to avoid race conditions"""
     try:
         # Use direct Scrapy command with JSON output to stdout
         cmd = [
-            "python", "-m", "scrapy", "crawl", "career_spider",
+            "python", "-m", "scrapy", "crawl", "optimized_career_spider",
             "-a", f"start_url={start_url}",
             "-a", f"max_pages={max_pages}",
-            "-o", "-", "-t", "json",                 # ✅ Xuất JSON ra stdout
+            "-o", "-:json",                          # ✅ Xuất JSON ra stdout
             "-s", "LOG_LEVEL=ERROR",                 # log đi stderr
             "-s", "FEED_EXPORT_ENCODING=utf-8",
             "-s", "TELNETCONSOLE_ENABLED=False",
@@ -88,7 +88,7 @@ def _run_spider_blocking(start_url: str, max_pages: int = 50) -> dict:
         logger.error(f"❌ {error_msg}")
         raise RuntimeError(error_msg)
 
-async def run_spider(start_url: str, max_pages: int = 50) -> dict:
+async def run_spider(start_url: str, max_pages: int = 100) -> dict:
     """Run Scrapy spider asynchronously using executor"""
     try:
         loop = asyncio.get_running_loop()

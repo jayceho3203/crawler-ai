@@ -859,9 +859,17 @@ class JobExtractionService:
                     # Jobs have individual URLs
                     response['job_urls'] = job_urls
                 else:
-                    # Jobs don't have individual URLs, return empty array instead of career page URL
-                    response['job_urls'] = []
-                    logger.warning(f"   ⚠️ No individual job URLs found, returning empty array")
+                    # Jobs don't have individual URLs, return career page URL with job indices
+                    direct_jobs = getattr(JobExtractionService, '_global_direct_jobs_cache', [])
+                    if direct_jobs:
+                        # Return career page URL for each job (not anchor links)
+                        response['job_urls'] = [career_page_url] * len(direct_jobs)
+                        response['job_indices'] = list(range(1, len(direct_jobs) + 1))
+                        logger.info(f"   📄 Returning {len(direct_jobs)} jobs with career page URL and indices")
+                    else:
+                        response['job_urls'] = []
+                        response['job_indices'] = []
+                        logger.warning(f"   ⚠️ No individual job URLs found, returning empty array")
                 
                 return response
                 
@@ -878,10 +886,8 @@ class JobExtractionService:
             }
     
     def _detect_job_url_type(self, job_url: str) -> str:
-        """Detect if job_url is anchor link, career page, or individual job"""
-        if '#' in job_url and '#job-' in job_url:
-            return 'anchor_link'  # career.com#job-1
-        elif self._is_career_page_url(job_url):
+        """Detect if job_url is career page or individual job"""
+        if self._is_career_page_url(job_url):
             return 'career_page'  # career.com
         else:
             return 'individual_job'  # job.com/position/123
@@ -940,35 +946,27 @@ class JobExtractionService:
             'error_message': error_message
             }
     
-    async def extract_job_details_only(self, job_url: str) -> Dict:
+    async def extract_job_details_only(self, job_url: str, job_index: int = None) -> Dict:
         """
         Extract detailed job information from a single job URL
-        Handles 3 types: anchor_link, career_page, individual_job
+        Handles 2 types: career_page, individual_job
+        For career pages, job_index specifies which job to extract (1-based)
         """
         start_time = time.time()
         
         try:
             logger.info(f"📄 Extracting job details from: {job_url}")
+            if job_index:
+                logger.info(f"   🎯 Job index: {job_index}")
             
             # Detect job URL type
             url_type = self._detect_job_url_type(job_url)
             logger.info(f"   🔍 Detected URL type: {url_type}")
             
-            if url_type == 'anchor_link':
-                # Handle direct job from cache (#job-1)
-                logger.info(f"   📄 Processing anchor link: {job_url}")
-                job_data = self._extract_direct_job_details(job_url)
-                if job_data:
-                    logger.info(f"   ✅ Found direct job data: {job_data.get('title', 'Unknown')}")
-                    return self._format_job_response(job_data, job_url)
-                else:
-                    logger.warning(f"   ⚠️ No direct job data found for: {job_url}")
-                    return self._empty_job_response(job_url, 'Direct job data not found in cache')
-            
-            elif url_type == 'career_page':
-                # Handle career page - extract first job
+            if url_type == 'career_page':
+                # Handle career page - extract specific job by index
                 logger.info(f"   📄 Processing career page: {job_url}")
-                return await self._extract_first_job_from_career_page(job_url, start_time)
+                return await self._extract_specific_job_from_career_page(job_url, job_index, start_time)
             
             else:  # individual_job
                 # Handle individual job page
@@ -978,6 +976,31 @@ class JobExtractionService:
         except Exception as e:
             logger.error(f"❌ Error in extract_job_details_only: {e}")
             return self._empty_job_response(job_url, str(e))
+
+    async def _extract_specific_job_from_career_page(self, career_url: str, job_index: int, start_time: float) -> Dict:
+        """Extract specific job by index from career page"""
+        try:
+            # Try to get from cache first
+            direct_jobs = getattr(JobExtractionService, '_global_direct_jobs_cache', [])
+            if direct_jobs and len(direct_jobs) > 0:
+                logger.info(f"   📄 Found {len(direct_jobs)} jobs in cache")
+                
+                # Extract specific job by index (1-based)
+                if job_index and 1 <= job_index <= len(direct_jobs):
+                    job_data = direct_jobs[job_index - 1]
+                    logger.info(f"   ✅ Found job {job_index}: {job_data.get('title', 'Unknown')}")
+                    return self._format_job_response(job_data, career_url)
+                else:
+                    logger.warning(f"   ⚠️ Invalid job index {job_index}, available: 1-{len(direct_jobs)}")
+                    return self._empty_job_response(career_url, f'Invalid job index {job_index}')
+            
+            # If no cache, extract directly from career page
+            logger.info(f"   📄 No cache found, extracting directly from career page")
+            return await self._extract_individual_job_details(career_url, start_time)
+            
+        except Exception as e:
+            logger.error(f"❌ Error extracting specific job from career page: {e}")
+            return self._empty_job_response(career_url, str(e))
 
     async def _extract_first_job_from_career_page(self, career_url: str, start_time: float) -> Dict:
         """Extract first job from career page"""
@@ -1841,12 +1864,14 @@ class JobExtractionService:
             direct_jobs = await self._extract_direct_jobs_from_career_page(soup, career_page_url)
             if direct_jobs:
                 logger.info(f"   📄 Found {len(direct_jobs)} direct jobs in career page content")
-                # Store direct jobs for later use
-                self._direct_jobs_cache = direct_jobs
-                # Return direct job URLs (using career page URL as base)
+                # Store direct jobs for later use with job_index
                 for i, job in enumerate(direct_jobs):
-                    job_url = f"{career_page_url}#job-{i+1}"
-                    job_urls.append(job_url)
+                    job['job_index'] = i + 1
+                    job['job_url'] = career_page_url  # Use career page URL as job URL
+                self._direct_jobs_cache = direct_jobs
+                # Return career page URL for each job (not anchor links)
+                for job in direct_jobs:
+                    job_urls.append(career_page_url)
                 return job_urls
             
             # Method 1: Look for job links with common patterns (less restrictive)

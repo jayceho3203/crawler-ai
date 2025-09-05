@@ -162,10 +162,17 @@ class OptimizedCareerSpider(scrapy.Spider):
         # Tìm tất cả links trên homepage
         all_links = self.extract_all_links(response)
         logger.info(f"🔗 Found {len(all_links)} links on homepage")
+        if all_links:
+            logger.info(f"🔗 Sample links: {all_links[:5]}")
+        else:
+            logger.warning(f"⚠️ No links found on homepage: {response.url}")
         
         # Phân loại và ưu tiên links
         prioritized_links = self.prioritize_links(all_links, response.url)
         logger.info(f"📊 Prioritized links: {len(prioritized_links)} categories")
+        for priority, links in prioritized_links.items():
+            if links:
+                logger.info(f"   Priority {priority}: {len(links)} links - {links[:3]}")
         
         # Crawl theo priority
         should_break = False
@@ -174,9 +181,10 @@ class OptimizedCareerSpider(scrapy.Spider):
                 break
                 
             logger.info(f"🎯 Processing priority {priority} with {len(links)} links")
-            # Chỉ crawl tối đa 3 links mỗi priority để tăng tốc
-            for link in links[:3]:
-                if self.crawled_pages >= self.max_pages or self.found_career_pages >= 5:
+            # Crawl more links for higher priority (career pages)
+            max_links = 5 if priority == 100 else 3 if priority == 80 else 2
+            for link in links[:max_links]:
+                if self.crawled_pages >= self.max_pages or self.found_career_pages >= 10:
                     logger.info(f"⏹️ Reached limit: pages={self.crawled_pages}, career_pages={self.found_career_pages}")
                     should_break = True
                     break
@@ -206,7 +214,7 @@ class OptimizedCareerSpider(scrapy.Spider):
         """
         links = []
         
-        # Ưu tiên navigation links
+        # Ưu tiên navigation links (expanded selectors)
         nav_selectors = [
             'nav a::attr(href)',
             'header a::attr(href)', 
@@ -214,7 +222,16 @@ class OptimizedCareerSpider(scrapy.Spider):
             '.menu a::attr(href)',
             '.navigation a::attr(href)',
             '.main-menu a::attr(href)',
-            '.top-menu a::attr(href)'
+            '.top-menu a::attr(href)',
+            '.header a::attr(href)',
+            '.nav a::attr(href)',
+            '.main-nav a::attr(href)',
+            '.primary-nav a::attr(href)',
+            '.site-nav a::attr(href)',
+            '.page-nav a::attr(href)',
+            '.breadcrumb a::attr(href)',
+            '.menu-item a::attr(href)',
+            '.nav-item a::attr(href)'
         ]
         
         for selector in nav_selectors:
@@ -311,7 +328,7 @@ class OptimizedCareerSpider(scrapy.Spider):
         """
         Phân loại links theo priority với keywords tối ưu
         """
-        # Keywords tối ưu cho career pages
+        # Keywords tối ưu cho career pages (expanded)
         career_keywords = [
             # Vietnamese keywords (tối ưu)
             'tuyen-dung', 'tuyển-dụng', 'tuyendung',
@@ -327,7 +344,7 @@ class OptimizedCareerSpider(scrapy.Spider):
             'tim-viec', 'tìm-việc', 'timviec',
             'dang-tuyen', 'đang-tuyển', 'dangtuyen',
             
-            # English keywords (tối ưu)
+            # English keywords (tối ưu) - expanded
             'career', 'careers', 'job', 'jobs',
             'recruitment', 'employment', 'hiring',
             'work', 'position', 'opportunity', 'vacancy',
@@ -338,7 +355,20 @@ class OptimizedCareerSpider(scrapy.Spider):
             'full-time', 'part-time', 'remote', 'hybrid',
             'onsite', 'on-site', 'freelance', 'contract',
             'internship', 'intern', 'graduate', 'entry-level',
-            'senior', 'junior', 'lead', 'principal'
+            'senior', 'junior', 'lead', 'principal',
+            
+            # Additional career patterns
+            'hr', 'human-resource', 'human-resources',
+            'staff', 'employee', 'employees',
+            'developer', 'engineer', 'analyst', 'manager',
+            'specialist', 'consultant', 'coordinator',
+            'assistant', 'director', 'executive',
+            'programmer', 'designer', 'architect',
+            'tester', 'qa', 'quality-assurance',
+            'devops', 'admin', 'administrator',
+            'sales', 'marketing', 'business',
+            'finance', 'accounting', 'legal',
+            'support', 'customer-service', 'operations'
         ]
         
         # Keywords cho navigation pages
@@ -429,7 +459,7 @@ class OptimizedCareerSpider(scrapy.Spider):
         self.crawled_pages += 1
         
         # Dừng sớm nếu đã tìm thấy đủ career pages
-        if self.found_career_pages >= 5:  # Increase from 2 to 5
+        if self.found_career_pages >= 10:  # Increase from 5 to 10 for better coverage
             logger.info(f"⏹️ Stopping crawl: Found enough career pages ({self.found_career_pages})")
             return
         
@@ -448,8 +478,10 @@ class OptimizedCareerSpider(scrapy.Spider):
                 if should_break:
                     break
                     
-                for link in link_list[:1]:  # Chỉ crawl 1 link mỗi priority để tăng tốc
-                    if self.crawled_pages >= self.max_pages or self.found_career_pages >= 5:
+                # Crawl more links for higher priority (career pages)
+                max_links = 5 if priority == 100 else 3 if priority == 80 else 2
+                for link in link_list[:max_links]:
+                    if self.crawled_pages >= self.max_pages or self.found_career_pages >= 10:
                         should_break = True
                         break
                         
@@ -623,13 +655,14 @@ class OptimizedCareerSpider(scrapy.Spider):
         }
         
         # Tạo result với cả career pages và contact info
+        crawl_time_delta = datetime.now() - self.start_time
         result = {
             'success': True,
             'requested_url': self.start_urls[0] if self.start_urls else '',
             'career_pages': career_pages_data,
             'total_pages_crawled': self.crawled_pages,
             'career_pages_found': len(career_pages_data),
-            'crawl_time': datetime.now() - self.start_time,
+            'crawl_time': crawl_time_delta.total_seconds(),  # Convert timedelta to seconds
             'crawl_method': 'scrapy_optimized',
             'contact_info': contact_info  # Include contact info
         }
