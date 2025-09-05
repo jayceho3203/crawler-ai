@@ -32,6 +32,7 @@ class JobExtractionService:
         self.extractor = HiddenJobExtractor()
         self.job_analyzer = JobAnalyzer()
         self.simple_formatter = SimpleJobFormatter()
+        self._direct_jobs_cache = []
         
         # Log which extractor is being used
         if USE_PLAYWRIGHT:
@@ -363,6 +364,10 @@ class JobExtractionService:
             'void(0)', 'undefined', 'null'
         ]
         
+        # Skip mailto links - they are application links, not job URLs
+        if url_lower.startswith('mailto:'):
+            return False
+        
         for pattern in skip_patterns:
             if pattern in url_lower:
                 return False
@@ -390,6 +395,11 @@ class JobExtractionService:
             '/dich-vu/', '/san-pham/', '/giai-phap/', '/gioi-thieu/',
             '/lien-he/', '/doi-ngu/', '/cong-ty/', '/tin-tuc/',
             '/bai-viet/', '/thong-cao/', '/truyen-thong/',
+            # Certificates, awards, details pages
+            '/certificates/', '/certificate/', '/awards/', '/award/',
+            '/details/', '/detail/', '/certificates-details/',
+            '/certificate-details/', '/award-details/', '/awards-details/',
+            '/achievements/', '/achievement/', '/recognition/',
             # Other common patterns
             '/privacy/', '/terms/', '/cookie/', '/sitemap/',
             '/search/', '/login/', '/register/', '/signup/',
@@ -406,22 +416,35 @@ class JobExtractionService:
         
         # Check for job indicators (must be present)
         job_indicators = [
-            # English patterns
+            # English patterns - specific job paths
             '/career/', '/job/', '/position/', '/vacancy/',
             '/opportunity/', '/opening/', '/apply/',
             '/recruitment/', '/employment/', '/hiring/',
-            # Vietnamese patterns  
+            # Vietnamese patterns - specific job paths
             '/tuyen-dung/', '/viec-lam/', '/co-hoi/',
             '/nhan-vien/', '/ung-vien/', '/cong-viec/',
             '/lam-viec/', '/thu-viec/', '/chinh-thuc/',
             '/nghe-nghiep/', '/tim-viec/', '/dang-tuyen/',
-            # Job-specific patterns
+            # Job-specific patterns - only if they appear in job context
             '/developer/', '/engineer/', '/analyst/', '/manager/',
             '/specialist/', '/consultant/', '/coordinator/',
             '/assistant/', '/director/', '/lead/', '/senior/',
             '/junior/', '/intern/', '/trainee/', '/graduate/',
             '/remote/', '/hybrid/', '/full-time/', '/part-time/',
-            '/contract/', '/freelance/', '/temporary/'
+            '/contract/', '/freelance/', '/temporary/',
+            # Additional job patterns
+            '/java/', '/php/', '/python/', '/javascript/', '/react/',
+            '/angular/', '/vue/', '/node/', '/spring/', '/laravel/',
+            '/frontend/', '/backend/', '/fullstack/', '/full-stack/',
+            '/mobile/', '/ios/', '/android/', '/flutter/', '/react-native/',
+            '/devops/', '/cloud/', '/aws/', '/azure/', '/kubernetes/',
+            '/data/', '/analytics/', '/machine-learning/', '/ai/',
+            '/blockchain/', '/crypto/', '/fintech/', '/ecommerce/',
+            '/marketing/', '/sales/', '/hr/', '/finance/', '/accounting/',
+            '/design/', '/ui/', '/ux/', '/product/', '/project/',
+            '/qa/', '/testing/', '/quality/', '/security/', '/cyber/',
+            '/support/', '/customer/', '/technical/', '/business/',
+            '/operations/', '/logistics/', '/supply/', '/procurement/'
         ]
         
         # Must have at least one job indicator
@@ -741,6 +764,9 @@ class JobExtractionService:
                 logger.info(f"   📊 Has individual URLs: {has_individual_urls}")
                 logger.info(f"   📊 Job URLs found: {len(job_urls)}")
                 
+                # Check if we have direct jobs data
+                direct_jobs_data = getattr(self, '_direct_jobs_cache', [])
+                
                 # Simplified response format for N8N workflow
                 response = {
                     'success': True,
@@ -751,6 +777,11 @@ class JobExtractionService:
                     'crawl_time': crawl_time,
                     'crawl_method': 'scrapy_optimized'
                 }
+                
+                # Add direct jobs data if available
+                if direct_jobs_data:
+                    response['direct_jobs'] = direct_jobs_data
+                    logger.info(f"   📄 Including {len(direct_jobs_data)} direct jobs data")
                 
                 return response
             else:
@@ -1360,6 +1391,187 @@ class JobExtractionService:
             logger.error(f"❌ Error extracting requirements and benefits: {e}")
             return None, None
     
+    async def _extract_direct_jobs_from_career_page(self, soup, career_page_url: str) -> List[Dict]:
+        """Extract jobs directly from career page content (no separate URLs)"""
+        try:
+            jobs = []
+            
+            # Remove navigation elements
+            for nav in soup.find_all(['nav', 'header', 'footer']):
+                nav.decompose()
+            
+            # Remove common navigation classes
+            for element in soup.find_all(class_=re.compile(r'nav|menu|header|footer|sidebar', re.I)):
+                element.decompose()
+            
+            # Look for job containers with common patterns
+            job_containers = []
+            
+            # Method 1: Look for job cards/items
+            job_selectors = [
+                '.job-item', '.job-card', '.job-listing', '.job-post',
+                '.position', '.vacancy', '.opening', '.opportunity',
+                '.career-item', '.career-card', '.career-listing',
+                '[class*="job"]', '[class*="position"]', '[class*="vacancy"]',
+                '[class*="career"]', '[class*="opening"]'
+            ]
+            
+            for selector in job_selectors:
+                containers = soup.select(selector)
+                job_containers.extend(containers)
+            
+            # Method 2: Look for repeated job patterns in content
+            if not job_containers:
+                # Look for sections that might contain multiple jobs
+                content_sections = soup.find_all(['div', 'section', 'article'], 
+                                               class_=re.compile(r'content|main|jobs|career|position', re.I))
+                
+                for section in content_sections:
+                    # Look for repeated patterns that might be jobs
+                    job_elements = section.find_all(['div', 'article', 'section'], 
+                                                  class_=re.compile(r'item|card|post|listing', re.I))
+                    if len(job_elements) >= 2:  # At least 2 similar elements
+                        job_containers.extend(job_elements)
+            
+            # Method 3: Look for job titles in headings
+            if not job_containers:
+                headings = soup.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6'])
+                for heading in headings:
+                    text = heading.get_text().strip().lower()
+                    if any(keyword in text for keyword in [
+                        'developer', 'engineer', 'manager', 'analyst', 'specialist',
+                        'tuyển dụng', 'việc làm', 'cơ hội', 'vị trí', 'nhân viên'
+                    ]):
+                        # Check if this heading is part of a job section
+                        parent = heading.parent
+                        if parent and parent not in job_containers:
+                            job_containers.append(parent)
+            
+            # Extract job details from containers
+            for i, container in enumerate(job_containers[:10]):  # Limit to 10 jobs
+                try:
+                    job_data = self._extract_job_from_container(container, i+1)
+                    if job_data:
+                        jobs.append(job_data)
+                        logger.info(f"   📄 Extracted direct job {i+1}: {job_data.get('title', 'Unknown')}")
+                except Exception as e:
+                    logger.warning(f"   ⚠️ Error extracting job from container {i+1}: {e}")
+                    continue
+            
+            return jobs
+            
+        except Exception as e:
+            logger.error(f"❌ Error extracting direct jobs from career page: {e}")
+            return []
+    
+    def _extract_job_from_container(self, container, job_index: int) -> Optional[Dict]:
+        """Extract job details from a single container"""
+        try:
+            # Extract title
+            title = ""
+            title_selectors = ['h1', 'h2', 'h3', 'h4', '.title', '.job-title', '.position-title']
+            for selector in title_selectors:
+                title_elem = container.select_one(selector)
+                if title_elem:
+                    title = title_elem.get_text().strip()
+                    break
+            
+            if not title:
+                # Try to find title in any text content
+                text_content = container.get_text().strip()
+                lines = [line.strip() for line in text_content.split('\n') if line.strip()]
+                for line in lines[:3]:  # Check first 3 lines
+                    if len(line) > 10 and len(line) < 100:  # Reasonable title length
+                        if any(keyword in line.lower() for keyword in [
+                            'developer', 'engineer', 'manager', 'analyst', 'specialist',
+                            'tuyển dụng', 'việc làm', 'cơ hội', 'vị trí', 'nhân viên'
+                        ]):
+                            title = line
+                            break
+            
+            if not title:
+                return None
+            
+            # Extract description
+            description = ""
+            desc_selectors = ['.description', '.content', '.details', 'p', '.job-desc']
+            for selector in desc_selectors:
+                desc_elem = container.select_one(selector)
+                if desc_elem:
+                    description = desc_elem.get_text().strip()
+                    break
+            
+            if not description:
+                # Use container text as description
+                description = container.get_text().strip()
+                # Remove title from description if it's at the beginning
+                if description.startswith(title):
+                    description = description[len(title):].strip()
+            
+            # Extract job type
+            job_type = "Full-time"  # Default
+            text_content = container.get_text().lower()
+            if any(keyword in text_content for keyword in ['part-time', 'part time', 'bán thời gian']):
+                job_type = "Part-time"
+            elif any(keyword in text_content for keyword in ['contract', 'hợp đồng']):
+                job_type = "Contract"
+            elif any(keyword in text_content for keyword in ['intern', 'internship', 'thực tập']):
+                job_type = "Internship"
+            elif any(keyword in text_content for keyword in ['remote', 'từ xa']):
+                job_type = "Remote"
+            
+            # Extract location
+            location = ""
+            location_selectors = ['.location', '.place', '.address', '[class*="location"]']
+            for selector in location_selectors:
+                loc_elem = container.select_one(selector)
+                if loc_elem:
+                    location = loc_elem.get_text().strip()
+                    break
+            
+            # Extract salary
+            salary = ""
+            salary_selectors = ['.salary', '.wage', '.pay', '[class*="salary"]']
+            for selector in salary_selectors:
+                sal_elem = container.select_one(selector)
+                if sal_elem:
+                    salary = sal_elem.get_text().strip()
+                    break
+            
+            return {
+                'title': title,
+                'description': description[:500] + "..." if len(description) > 500 else description,
+                'job_type': job_type,
+                'location': location,
+                'salary': salary,
+                'company': self.extract_company_from_url(container.get('data-company', '')),
+                'url': f"#job-{job_index}",
+                'source': 'direct_career_page'
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Error extracting job from container: {e}")
+            return None
+    
+    def extract_company_from_url(self, url: str) -> str:
+        """Extract company name from URL dynamically"""
+        try:
+            from urllib.parse import urlparse
+            parsed = urlparse(url)
+            domain = parsed.netloc.lower()
+            
+            # Remove www, subdomain, get main domain
+            if domain.startswith('www.'):
+                domain = domain[4:]
+            
+            # Extract company name from domain
+            company = domain.split('.')[0]
+            
+            return company.title() if company else "Unknown"
+            
+        except Exception:
+            return "Unknown"
+    
     async def _extract_job_urls_from_career_page(self, career_page_url: str) -> List[str]:
         """Extract job URLs directly from career page HTML"""
         try:
@@ -1377,6 +1589,18 @@ class JobExtractionService:
             soup = BeautifulSoup(html_content, 'html.parser')
             
             job_urls = []
+            
+            # Method 0: Extract jobs directly from career page content (no separate URLs)
+            direct_jobs = await self._extract_direct_jobs_from_career_page(soup, career_page_url)
+            if direct_jobs:
+                logger.info(f"   📄 Found {len(direct_jobs)} direct jobs in career page content")
+                # Store direct jobs for later use
+                self._direct_jobs_cache = direct_jobs
+                # Return direct job URLs (using career page URL as base)
+                for i, job in enumerate(direct_jobs):
+                    job_url = f"{career_page_url}#job-{i+1}"
+                    job_urls.append(job_url)
+                return job_urls
             
             # Method 1: Look for job links with common patterns (less restrictive)
             job_link_patterns = [
@@ -1410,6 +1634,10 @@ class JobExtractionService:
                         if self._is_job_url(full_url) and full_url not in job_urls:
                             job_urls.append(full_url)
                             logger.info(f"   🔗 Found job URL: {full_url}")
+                
+                # Skip mailto links completely
+                if href.startswith('mailto:'):
+                    continue
                 
                 # Check if link text contains job-related keywords (more flexible)
                 link_text = link.get_text().strip().lower()
