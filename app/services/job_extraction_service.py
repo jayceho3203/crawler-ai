@@ -33,6 +33,13 @@ class JobExtractionService:
         self.job_analyzer = JobAnalyzer()
         self.simple_formatter = SimpleJobFormatter()
         self._direct_jobs_cache = []
+        self._career_page_cache = None
+        
+        # Class-level cache for global access
+        if not hasattr(JobExtractionService, '_global_direct_jobs_cache'):
+            JobExtractionService._global_direct_jobs_cache = []
+        if not hasattr(JobExtractionService, '_global_career_page_cache'):
+            JobExtractionService._global_career_page_cache = None
         
         # Log which extractor is being used
         if USE_PLAYWRIGHT:
@@ -783,6 +790,16 @@ class JobExtractionService:
                     response['direct_jobs'] = direct_jobs_data
                     logger.info(f"   📄 Including {len(direct_jobs_data)} direct jobs data")
                 
+                # Cache career page URL and direct jobs for extract_job_details
+                self._career_page_cache = career_page_url
+                self._direct_jobs_cache = direct_jobs_data
+                logger.info(f"   💾 Cached career page and {len(direct_jobs_data)} direct jobs")
+                
+                # Also cache in class instance for global access
+                JobExtractionService._global_career_page_cache = career_page_url
+                JobExtractionService._global_direct_jobs_cache = direct_jobs_data
+                logger.info(f"   💾 Set global cache: {len(direct_jobs_data)} direct jobs")
+                
                 return response
             else:
                 # No job URLs found, fallback to extracting jobs from career page
@@ -860,117 +877,164 @@ class JobExtractionService:
                 'crawl_method': 'scrapy_optimized'
             }
     
+    def _detect_job_url_type(self, job_url: str) -> str:
+        """Detect if job_url is anchor link, career page, or individual job"""
+        if '#' in job_url and '#job-' in job_url:
+            return 'anchor_link'  # career.com#job-1
+        elif self._is_career_page_url(job_url):
+            return 'career_page'  # career.com
+        else:
+            return 'individual_job'  # job.com/position/123
+
+    def _extract_direct_job_details(self, job_url: str) -> Optional[Dict]:
+        """Extract job details from direct jobs cache"""
+        try:
+            # Extract job index from #job-1
+            if '#job-' in job_url:
+                job_index = int(job_url.split('#job-')[1]) - 1
+                
+                # Use global cache (since each request creates new instance)
+                direct_jobs = getattr(JobExtractionService, '_global_direct_jobs_cache', [])
+                logger.info(f"   📄 Checking global cache for job {job_index + 1} (total: {len(direct_jobs)})")
+                
+                if 0 <= job_index < len(direct_jobs):
+                    logger.info(f"   ✅ Found direct job {job_index + 1} from global cache")
+                    return direct_jobs[job_index]
+                else:
+                    logger.warning(f"   ⚠️ Job index {job_index} not found in global cache (total: {len(direct_jobs)})")
+            return None
+        except (ValueError, IndexError) as e:
+            logger.warning(f"   ⚠️ Error extracting direct job index: {e}")
+            return None
+
+    def _format_job_response(self, job_data: Dict, job_url: str, success: bool = True, error_message: str = None) -> Dict:
+        """Format job data to standard response"""
+        return {
+            'success': success,
+            'job_url': job_url,
+            'job_details': {
+                'job_name': job_data.get('title', ''),
+                'job_type': job_data.get('job_type', 'Full-time'),
+                'job_role': job_data.get('title', ''),
+                'job_description': job_data.get('description', ''),
+                'job_link': job_url
+            },
+            'crawl_time': 0,
+            'crawl_method': 'direct_cache' if success else 'failed'
+        }
+
+    def _empty_job_response(self, job_url: str, error_message: str = 'Job not found') -> Dict:
+        """Return empty job response"""
+        return {
+            'success': False,
+            'job_url': job_url,
+            'job_details': {
+                'job_name': '',
+                'job_type': 'Full-time',
+                'job_role': '',
+                'job_description': '',
+                'job_link': job_url
+            },
+            'crawl_time': 0,
+            'crawl_method': 'failed',
+            'error_message': error_message
+            }
+    
     async def extract_job_details_only(self, job_url: str) -> Dict:
         """
         Extract detailed job information from a single job URL
+        Handles 3 types: anchor_link, career_page, individual_job
         """
-        start_time = time.time() # Changed from datetime.now() to time.time()
+        start_time = time.time()
         
         try:
             logger.info(f"📄 Extracting job details from: {job_url}")
             
-            # Check if the URL is actually a career page (not a specific job page)
-            is_career_page = self._is_career_page_url(job_url)
+            # Detect job URL type
+            url_type = self._detect_job_url_type(job_url)
+            logger.info(f"   🔍 Detected URL type: {url_type}")
             
-            if is_career_page:
-                logger.info(f"   ⚠️ URL appears to be a career page, extracting jobs from career page")
-                # Extract jobs from career page instead
-                result = await self._extract_jobs_from_single_page(
-                    job_url, max_jobs=10, include_hidden_jobs=True, include_job_details=True
-                )
-                
-                if result['success'] and result.get('jobs'):
-                    # Take the first job as the main job
-                    first_job = result['jobs'][0]
-                    job_details = {
-                        'job_name': first_job.get('title', ''),
-                        'job_type': first_job.get('job_type', 'Full-time'),
-                        'job_role': first_job.get('title', ''),
-                        'job_description': first_job.get('description', ''),
-                        'job_link': job_url
-                    }
+            if url_type == 'anchor_link':
+                # Handle direct job from cache (#job-1)
+                logger.info(f"   📄 Processing anchor link: {job_url}")
+                job_data = self._extract_direct_job_details(job_url)
+                if job_data:
+                    logger.info(f"   ✅ Found direct job data: {job_data.get('title', 'Unknown')}")
+                    return self._format_job_response(job_data, job_url)
                 else:
-                    # No jobs found, return empty details
-                    job_details = {
-                        'job_name': '',
-                        'job_type': 'Full-time',
-                        'job_role': '',
-                        'job_description': '',
-                        'job_link': job_url
-                    }
-            else:
-                # Normal job detail page extraction
-                from .crawler import crawl_single_url
-                result = await crawl_single_url(job_url)
+                    logger.warning(f"   ⚠️ No direct job data found for: {job_url}")
+                    return self._empty_job_response(job_url, 'Direct job data not found in cache')
+            
+            elif url_type == 'career_page':
+                # Handle career page - extract first job
+                logger.info(f"   📄 Processing career page: {job_url}")
+                return await self._extract_first_job_from_career_page(job_url, start_time)
+            
+            else:  # individual_job
+                # Handle individual job page
+                logger.info(f"   📄 Processing individual job page: {job_url}")
+                return await self._extract_individual_job_details(job_url, start_time)
                 
-                if not result['success']:
-                    return {
-                        'success': False,
-                        'job_url': job_url,
-                        'error_message': 'Failed to crawl job page',
-                        'job_details': {},
-                        'crawl_time': (time.time() - start_time), # Changed from datetime.now() to time.time()
-                        'crawl_method': 'scrapy_optimized'
-                    }
-                
-                # Extract job details from HTML
-                job_details = self._extract_job_details_from_html(result, job_url)
-                
-                # Fallback: if HTML parsing failed to get meaningful data, try AI-based extractor
-                if not job_details.get('job_name') and not job_details.get('job_description'):
-                    try:
-                        from .job_extractor import extract_job_details_with_ai
-                        logger.info("   🤖 Falling back to AI-based job detail extraction")
-                        ai_job = await extract_job_details_with_ai(result.get('html', ''), job_url)
-                        if ai_job:
-                            job_details = {
-                                'job_name': ai_job.get('job_name', ''),
-                                'job_type': ai_job.get('job_type', 'Full-time'),
-                                'job_role': ai_job.get('job_role', ai_job.get('job_name', '')),
-                                'job_description': ai_job.get('job_description', ''),
-                                'job_link': ai_job.get('job_link', job_url)
-                            }
-                    except Exception as e:
-                        logger.warning(f"   ⚠️ AI fallback failed: {e}")
-                        
-                        # Final fallback: try Playwright-based extractor
-                        try:
-                            from .job_extractor import extract_job_details_from_url
-                            logger.info("   🔄 Final fallback to Playwright-based extraction")
-                            js_job = await extract_job_details_from_url(job_url)
-                            if js_job:
-                                job_details = {
-                                    'job_name': js_job.get('job_name', ''),
-                                    'job_type': js_job.get('job_type', 'Full-time'),
-                                    'job_role': js_job.get('job_role', js_job.get('job_name', '')),
-                                    'job_description': js_job.get('job_description', ''),
-                                    'job_link': js_job.get('job_link', job_url)
-                                }
-                        except Exception as e2:
-                            logger.warning(f"   ⚠️ Playwright fallback also failed: {e2}")
-            
-            crawl_time = (time.time() - start_time) # Changed from datetime.now() to time.time()
-            
-            logger.info(f"✅ Extracted job details from {job_url}")
-            
-            return {
-                'success': True,
-                'job_url': job_url,
-                'job_details': job_details,
-                'crawl_time': crawl_time,
-                'crawl_method': 'scrapy_optimized'
-            }
-            
         except Exception as e:
-            logger.error(f"❌ Error extracting job details: {e}")
-            return {
-                'success': False,
-                'job_url': job_url,
-                'error_message': str(e),
-                'job_details': {},
-                'crawl_time': (time.time() - start_time), # Changed from datetime.now() to time.time()
-                'crawl_method': 'scrapy_optimized'
-            }
+            logger.error(f"❌ Error in extract_job_details_only: {e}")
+            return self._empty_job_response(job_url, str(e))
+
+    async def _extract_first_job_from_career_page(self, career_url: str, start_time: float) -> Dict:
+        """Extract first job from career page"""
+        try:
+            # Try to get from cache first
+            if hasattr(self, '_career_page_cache') and career_url == self._career_page_cache:
+                direct_jobs = getattr(self, '_direct_jobs_cache', [])
+                if direct_jobs:
+                    logger.info(f"   📄 Using cached career page data")
+                    return self._format_job_response(direct_jobs[0], career_url)
+            
+            # Fallback: extract from career page
+            logger.info(f"   📄 Extracting from career page directly")
+            result = await self._extract_jobs_from_single_page(
+                career_url, max_jobs=1, include_hidden_jobs=True, include_job_details=True
+            )
+            
+            if result['success'] and result.get('jobs'):
+                first_job = result['jobs'][0]
+                job_data = {
+                    'title': first_job.get('title', ''),
+                    'job_type': first_job.get('job_type', 'Full-time'),
+                    'description': first_job.get('description', '')
+                }
+                return self._format_job_response(job_data, career_url)
+            else:
+                return self._empty_job_response(career_url, 'No jobs found on career page')
+                
+        except Exception as e:
+            logger.error(f"❌ Error extracting from career page: {e}")
+            return self._empty_job_response(career_url, str(e))
+
+    async def _extract_individual_job_details(self, job_url: str, start_time: float) -> Dict:
+        """Extract job details from individual job page"""
+        try:
+            from .crawler import crawl_single_url
+            result = await crawl_single_url(job_url)
+            
+            if not result['success']:
+                return self._empty_job_response(job_url, 'Failed to crawl job page')
+            
+            # Extract job details from HTML
+            job_details = self._extract_job_details_from_html(result, job_url)
+            
+            if job_details:
+                job_data = {
+                    'title': job_details.get('job_name', ''),
+                    'job_type': job_details.get('job_type', 'Full-time'),
+                    'description': job_details.get('job_description', '')
+                }
+                return self._format_job_response(job_data, job_url)
+            else:
+                return self._empty_job_response(job_url, 'No job details found on page')
+                
+        except Exception as e:
+            logger.error(f"❌ Error extracting individual job details: {e}")
+            return self._empty_job_response(job_url, str(e))
     
     def _is_career_page_url(self, url: str) -> bool:
         """Check if URL is a career page (not a specific job page)"""
