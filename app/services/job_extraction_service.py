@@ -1456,7 +1456,7 @@ class JobExtractionService:
             return None, None
     
     async def _extract_direct_jobs_from_career_page(self, soup, career_page_url: str) -> List[Dict]:
-        """Extract jobs directly from career page content (no separate URLs)"""
+        """Extract jobs directly from career page content with multiple patterns support"""
         try:
             jobs = []
             
@@ -1468,10 +1468,95 @@ class JobExtractionService:
             for element in soup.find_all(class_=re.compile(r'nav|menu|header|footer|sidebar', re.I)):
                 element.decompose()
             
-            # Look for job containers with common patterns
-            job_containers = []
+            # Method 1: Look for job tables (like NSC Software)
+            table_jobs = self._extract_jobs_from_tables(soup)
+            if table_jobs:
+                logger.info(f"   📊 Found {len(table_jobs)} jobs from table format")
+                jobs.extend(table_jobs)
             
-            # Method 1: Look for job cards/items
+            # Method 2: Look for job cards/items (like Migitek)
+            if not jobs:
+                card_jobs = self._extract_jobs_from_cards(soup)
+                if card_jobs:
+                    logger.info(f"   📄 Found {len(card_jobs)} jobs from card format")
+                    jobs.extend(card_jobs)
+            
+            # Method 3: Look for job lists
+            if not jobs:
+                list_jobs = self._extract_jobs_from_lists(soup)
+                if list_jobs:
+                    logger.info(f"   📋 Found {len(list_jobs)} jobs from list format")
+                    jobs.extend(list_jobs)
+            
+            # Method 4: Look for job sections with headings
+            if not jobs:
+                heading_jobs = self._extract_jobs_from_headings(soup)
+                if heading_jobs:
+                    logger.info(f"   🎯 Found {len(heading_jobs)} jobs from heading format")
+                    jobs.extend(heading_jobs)
+            
+            # Filter out non-job content (benefits, culture, etc.)
+            filtered_jobs = self._filter_real_jobs(jobs)
+            
+            logger.info(f"   ✅ Total jobs extracted: {len(filtered_jobs)} (filtered from {len(jobs)})")
+            return filtered_jobs
+            
+        except Exception as e:
+            logger.error(f"❌ Error extracting direct jobs from career page: {e}")
+            return []
+    
+    def _extract_jobs_from_tables(self, soup) -> List[Dict]:
+        """Extract jobs from table format (like NSC Software)"""
+        jobs = []
+        try:
+            # Look for tables with job-related content
+            tables = soup.find_all('table')
+            for table in tables:
+                rows = table.find_all('tr')
+                for row in rows:
+                    cells = row.find_all(['td', 'th'])
+                    if len(cells) >= 2:  # At least 2 columns
+                        # Extract job title from first cell
+                        title_cell = cells[0]
+                        title = title_cell.get_text().strip()
+                        
+                        # Check if this looks like a job title
+                        if self._is_job_title(title):
+                            job_data = {
+                                'title': title,
+                                'description': '',
+                                'job_type': 'Full-time',
+                                'location': '',
+                                'salary': '',
+                                'company': self.extract_company_from_url(''),
+                                'url': f"#job-{len(jobs) + 1}",
+                                'source': 'table_format'
+                            }
+                            
+                            # Extract additional info from other cells
+                            if len(cells) > 1:
+                                experience = cells[1].get_text().strip()
+                                if experience:
+                                    job_data['description'] = f"Experience: {experience}"
+                            
+                            if len(cells) > 2:
+                                positions = cells[2].get_text().strip()
+                                if positions:
+                                    job_data['description'] += f" | Positions: {positions}"
+                            
+                            jobs.append(job_data)
+                            logger.info(f"   📊 Extracted table job: {title}")
+            
+            return jobs
+        except Exception as e:
+            logger.error(f"❌ Error extracting jobs from tables: {e}")
+            return []
+    
+    def _extract_jobs_from_cards(self, soup) -> List[Dict]:
+        """Extract jobs from card format (like Migitek)"""
+        jobs = []
+        try:
+            # Look for job cards/items
             job_selectors = [
                 '.job-item', '.job-card', '.job-listing', '.job-post',
                 '.position', '.vacancy', '.opening', '.opportunity',
@@ -1480,53 +1565,139 @@ class JobExtractionService:
                 '[class*="career"]', '[class*="opening"]'
             ]
             
+            job_containers = []
             for selector in job_selectors:
                 containers = soup.select(selector)
                 job_containers.extend(containers)
             
-            # Method 2: Look for repeated job patterns in content
-            if not job_containers:
-                # Look for sections that might contain multiple jobs
-                content_sections = soup.find_all(['div', 'section', 'article'], 
-                                               class_=re.compile(r'content|main|jobs|career|position', re.I))
-                
-                for section in content_sections:
-                    # Look for repeated patterns that might be jobs
-                    job_elements = section.find_all(['div', 'article', 'section'], 
-                                                  class_=re.compile(r'item|card|post|listing', re.I))
-                    if len(job_elements) >= 2:  # At least 2 similar elements
-                        job_containers.extend(job_elements)
-            
-            # Method 3: Look for job titles in headings
-            if not job_containers:
-                headings = soup.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6'])
-                for heading in headings:
-                    text = heading.get_text().strip().lower()
-                    if any(keyword in text for keyword in [
-                        'developer', 'engineer', 'manager', 'analyst', 'specialist',
-                        'tuyển dụng', 'việc làm', 'cơ hội', 'vị trí', 'nhân viên'
-                    ]):
-                        # Check if this heading is part of a job section
-                        parent = heading.parent
-                        if parent and parent not in job_containers:
-                            job_containers.append(parent)
-            
             # Extract job details from containers
-            for i, container in enumerate(job_containers[:10]):  # Limit to 10 jobs
+            for i, container in enumerate(job_containers[:10]):
                 try:
                     job_data = self._extract_job_from_container(container, i+1)
-                    if job_data:
+                    if job_data and self._is_job_title(job_data.get('title', '')):
                         jobs.append(job_data)
-                        logger.info(f"   📄 Extracted direct job {i+1}: {job_data.get('title', 'Unknown')}")
+                        logger.info(f"   📄 Extracted card job: {job_data.get('title', 'Unknown')}")
                 except Exception as e:
                     logger.warning(f"   ⚠️ Error extracting job from container {i+1}: {e}")
                     continue
             
             return jobs
-            
         except Exception as e:
-            logger.error(f"❌ Error extracting direct jobs from career page: {e}")
+            logger.error(f"❌ Error extracting jobs from cards: {e}")
             return []
+    
+    def _extract_jobs_from_lists(self, soup) -> List[Dict]:
+        """Extract jobs from list format"""
+        jobs = []
+        try:
+            # Look for lists with job-related content
+            lists = soup.find_all(['ul', 'ol'])
+            for list_elem in lists:
+                items = list_elem.find_all('li')
+                for item in items:
+                    text = item.get_text().strip()
+                    if self._is_job_title(text):
+                        job_data = {
+                            'title': text,
+                            'description': '',
+                            'job_type': 'Full-time',
+                            'location': '',
+                            'salary': '',
+                            'company': self.extract_company_from_url(''),
+                            'url': f"#job-{len(jobs) + 1}",
+                            'source': 'list_format'
+                        }
+                        jobs.append(job_data)
+                        logger.info(f"   📋 Extracted list job: {text}")
+            
+            return jobs
+        except Exception as e:
+            logger.error(f"❌ Error extracting jobs from lists: {e}")
+            return []
+    
+    def _extract_jobs_from_headings(self, soup) -> List[Dict]:
+        """Extract jobs from headings"""
+        jobs = []
+        try:
+            headings = soup.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6'])
+            for heading in headings:
+                text = heading.get_text().strip()
+                if self._is_job_title(text):
+                    job_data = {
+                        'title': text,
+                        'description': '',
+                        'job_type': 'Full-time',
+                        'location': '',
+                        'salary': '',
+                        'company': self.extract_company_from_url(''),
+                        'url': f"#job-{len(jobs) + 1}",
+                        'source': 'heading_format'
+                    }
+                    jobs.append(job_data)
+                    logger.info(f"   🎯 Extracted heading job: {text}")
+            
+            return jobs
+        except Exception as e:
+            logger.error(f"❌ Error extracting jobs from headings: {e}")
+            return []
+    
+    def _is_job_title(self, text: str) -> bool:
+        """Check if text looks like a job title"""
+        if not text or len(text) < 5:
+            return False
+        
+        text_lower = text.lower()
+        
+        # Job title indicators
+        job_indicators = [
+            'developer', 'engineer', 'manager', 'analyst', 'specialist',
+            'coordinator', 'assistant', 'director', 'lead', 'head', 'chief',
+            'architect', 'consultant', 'advisor', 'expert', 'professional',
+            'programmer', 'coder', 'tester', 'qa', 'devops', 'sre',
+            'senior', 'junior', 'mid', 'entry', 'level', 'principal', 'staff',
+            'associate', 'executive', 'vice', 'deputy',
+            'full-stack', 'frontend', 'backend', 'mobile', 'web',
+            'data', 'ai', 'ml', 'blockchain', 'crypto', 'fintech',
+            'marketing', 'sales', 'hr', 'finance', 'legal', 'operations',
+            'python', 'java', 'javascript', 'react', 'vue', 'angular',
+            'node', 'php', 'c#', 'dotnet', 'ruby', 'go', 'rust',
+            'aws', 'azure', 'gcp', 'docker', 'kubernetes'
+        ]
+        
+        # Benefits/culture indicators (NOT jobs)
+        non_job_indicators = [
+            'health insurance', 'working per week', 'appreciation bonus',
+            'competitive salary', 'benefits', 'human-centric', 'culture',
+            'work from home', 'remote work', 'flexible', 'vacation',
+            'sick leave', 'maternity', 'paternity', 'retirement',
+            'gym membership', 'free lunch', 'snacks', 'coffee',
+            'team building', 'company events', 'training', 'education'
+        ]
+        
+        # Check for non-job indicators first
+        for indicator in non_job_indicators:
+            if indicator in text_lower:
+                return False
+        
+        # Check for job indicators
+        for indicator in job_indicators:
+            if indicator in text_lower:
+                return True
+        
+        return False
+    
+    def _filter_real_jobs(self, jobs: List[Dict]) -> List[Dict]:
+        """Filter out non-job content (benefits, culture, etc.)"""
+        filtered_jobs = []
+        
+        for job in jobs:
+            title = job.get('title', '')
+            if self._is_job_title(title):
+                filtered_jobs.append(job)
+            else:
+                logger.info(f"   🚫 Filtered out non-job: {title}")
+        
+        return filtered_jobs
     
     def _extract_job_from_container(self, container, job_index: int) -> Optional[Dict]:
         """Extract job details from a single container"""
