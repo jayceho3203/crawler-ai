@@ -10,6 +10,7 @@ import logging
 import time
 import os
 import tempfile
+import re
 from datetime import datetime
 from typing import Dict, List
 from urllib.parse import urljoin, urlparse
@@ -57,6 +58,36 @@ class OptimizedCareerSpider(scrapy.Spider):
     """
 
     name = 'optimized_career_spider'
+    
+    # Exclude menu keywords that are typically navigation tabs
+    EXCLUDE_MENU_KEYWORDS = [
+        # Company info
+        'about', 'about-us', 'company', 'team', 'leadership',
+        'contact', 'contact-us', 'support', 'help',
+        
+        # Marketing
+        'marketing', 'advertising', 'seo', 'sem', 'social-media',
+        'content', 'blog', 'news', 'press', 'media',
+        
+        # Technical
+        'api', 'documentation', 'docs', 'tutorial', 'guide',
+        'pricing', 'plans', 'features', 'benefits',
+        
+        # Other
+        'privacy', 'terms', 'policy', 'sitemap', 'search',
+        'login', 'register', 'signup', 'dashboard'
+    ]
+    
+    # URL patterns to exclude (menu tabs only)
+    EXCLUDE_MENU_PATTERNS = [
+        r'.*/(about|company|team|leadership).*',
+        r'.*/(contact|support|help).*',
+        r'.*/(marketing|advertising|seo).*',
+        r'.*/(api|docs|documentation).*',
+        r'.*/(pricing|plans|features).*',
+        r'.*/(privacy|terms|policy).*',
+        r'.*/(login|register|signup).*'
+    ]
     
     # Memory optimization: reduce concurrent requests
     custom_settings = {
@@ -213,6 +244,22 @@ class OptimizedCareerSpider(scrapy.Spider):
         
         return filtered_links
     
+    def should_exclude_url(self, url):
+        """Check if URL should be excluded (menu tabs only)"""
+        url_lower = url.lower()
+        
+        # Check for exact menu keyword matches
+        for keyword in self.EXCLUDE_MENU_KEYWORDS:
+            if f'/{keyword}' in url_lower or url_lower.endswith(f'/{keyword}'):
+                return True
+        
+        # Check patterns
+        for pattern in self.EXCLUDE_MENU_PATTERNS:
+            if re.match(pattern, url_lower):
+                return True
+        
+        return False
+
     def is_valid_link(self, link: str) -> bool:
         """
         Kiểm tra link có hợp lệ không với strict filtering
@@ -222,6 +269,10 @@ class OptimizedCareerSpider(scrapy.Spider):
         
         # Loại bỏ external links
         if link.startswith('http') and self.domain not in link:
+            return False
+        
+        # Check if URL should be excluded (menu tabs)
+        if self.should_exclude_url(link):
             return False
         
         # STRICT FILTERING: Exclude common non-job URLs
@@ -585,6 +636,40 @@ class OptimizedCareerSpider(scrapy.Spider):
             logger.error(f"❌ Error saving result: {e}")
         
         return result
+
+    def clean_job_title(self, title):
+        """Clean HTML tags from job title"""
+        if not title:
+            return ""
+        
+        # Remove HTML tags
+        clean_title = re.sub(r'<[^>]+>', '', title)
+        
+        # Clean extra whitespace
+        clean_title = re.sub(r'\s+', ' ', clean_title).strip()
+        
+        return clean_title
+
+    def extract_company_from_url(self, url):
+        """Extract company name from URL dynamically"""
+        try:
+            parsed = urlparse(url)
+            domain = parsed.netloc.lower()
+            
+            # Remove www, subdomain, get main domain
+            if domain.startswith('www.'):
+                domain = domain[4:]
+            
+            # Extract company name from domain
+            # skyvietnam.com.vn -> skyvietnam
+            # ekotek.vn -> ekotek
+            # company.com -> company
+            company = domain.split('.')[0]
+            
+            return company.title()  # Skyvietnam, Ekotek
+            
+        except Exception:
+            return "Unknown"
 
     def extract_job_urls_from_career_page(self, response) -> List[str]:
         """
