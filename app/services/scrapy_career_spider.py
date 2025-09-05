@@ -554,7 +554,17 @@ class OptimizedCareerSpider(scrapy.Spider):
         content = response.text.lower()
         title = response.css('title::text').get('').lower()
         
-        # Job detail page indicators (loại trừ)
+        # Parse URL để kiểm tra subdomain
+        from urllib.parse import urlparse
+        parsed_url = urlparse(url)
+        domain = parsed_url.netloc.lower()
+        path = parsed_url.path.lower()
+        
+        # 1. Kiểm tra subdomain career (HIGHEST PRIORITY)
+        if domain.startswith('career.') or domain.startswith('careers.') or domain.startswith('jobs.'):
+            return True
+        
+        # 2. Job detail page indicators (loại trừ)
         job_detail_indicators = [
             '/career/', '/job/', '/position/', '/opportunity/',
             '/tuyen-dung/', '/viec-lam/', '/co-hoi/',
@@ -567,7 +577,7 @@ class OptimizedCareerSpider(scrapy.Spider):
             if indicator in url:
                 return False
         
-        # Career listing page indicators
+        # 3. Career listing page indicators
         career_listing_indicators = [
             'career.html', 'careers.html', 'job.html', 'jobs.html',
             'tuyen-dung.html', 'viec-lam.html', 'co-hoi.html',
@@ -580,7 +590,7 @@ class OptimizedCareerSpider(scrapy.Spider):
             if indicator in url:
                 return True
         
-        # Kiểm tra content
+        # 4. Kiểm tra content
         if any(indicator in content for indicator in ['apply now', 'view all jobs', 'browse positions', 'current openings']):
             return True
         

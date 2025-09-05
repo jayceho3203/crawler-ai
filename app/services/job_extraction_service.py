@@ -992,7 +992,7 @@ class JobExtractionService:
             # Fallback: extract from career page
             logger.info(f"   📄 Extracting from career page directly")
             result = await self._extract_jobs_from_single_page(
-                career_url, max_jobs=1, include_hidden_jobs=True, include_job_details=True
+           career_url, max_jobs=1, include_hidden_jobs=True, include_job_details=True
             )
             
             if result['success'] and result.get('jobs'):
@@ -1040,7 +1040,17 @@ class JobExtractionService:
         """Check if URL is a career page (not a specific job page)"""
         url_lower = url.lower()
         
-        # Career page indicators
+        # Parse URL để kiểm tra subdomain
+        from urllib.parse import urlparse
+        parsed_url = urlparse(url_lower)
+        domain = parsed_url.netloc.lower()
+        path = parsed_url.path.lower()
+        
+        # 1. Kiểm tra subdomain career (HIGHEST PRIORITY)
+        if domain.startswith('career.') or domain.startswith('careers.') or domain.startswith('jobs.'):
+            return True
+        
+        # 2. Career page indicators
         career_indicators = [
             '/career', '/careers', '/jobs', '/positions', '/tuyen-dung',
             '/recruitment', '/vacancies', '/openings', '/opportunities'
@@ -1460,13 +1470,18 @@ class JobExtractionService:
         try:
             jobs = []
             
-            # Remove navigation elements
+            # Remove navigation elements (but preserve job content)
             for nav in soup.find_all(['nav', 'header', 'footer']):
-                nav.decompose()
+                # Only remove if it doesn't contain job-related content
+                nav_text = nav.get_text().lower()
+                if not any(keyword in nav_text for keyword in ['job', 'career', 'position', 'tuyển', 'việc']):
+                    nav.decompose()
             
-            # Remove common navigation classes
+            # Remove common navigation classes (but preserve job content)
             for element in soup.find_all(class_=re.compile(r'nav|menu|header|footer|sidebar', re.I)):
-                element.decompose()
+                element_text = element.get_text().lower()
+                if not any(keyword in element_text for keyword in ['job', 'career', 'position', 'tuyển', 'việc']):
+                    element.decompose()
             
             # Method 1: Look for job tables (like NSC Software)
             table_jobs = self._extract_jobs_from_tables(soup)
@@ -1475,25 +1490,22 @@ class JobExtractionService:
                 jobs.extend(table_jobs)
             
             # Method 2: Look for job cards/items (like Migitek)
-            if not jobs:
-                card_jobs = self._extract_jobs_from_cards(soup)
-                if card_jobs:
-                    logger.info(f"   📄 Found {len(card_jobs)} jobs from card format")
-                    jobs.extend(card_jobs)
+            card_jobs = self._extract_jobs_from_cards(soup)
+            if card_jobs:
+                logger.info(f"   📄 Found {len(card_jobs)} jobs from card format")
+                jobs.extend(card_jobs)
             
             # Method 3: Look for job lists
-            if not jobs:
-                list_jobs = self._extract_jobs_from_lists(soup)
-                if list_jobs:
-                    logger.info(f"   📋 Found {len(list_jobs)} jobs from list format")
-                    jobs.extend(list_jobs)
+            list_jobs = self._extract_jobs_from_lists(soup)
+            if list_jobs:
+                logger.info(f"   📋 Found {len(list_jobs)} jobs from list format")
+                jobs.extend(list_jobs)
             
             # Method 4: Look for job sections with headings
-            if not jobs:
-                heading_jobs = self._extract_jobs_from_headings(soup)
-                if heading_jobs:
-                    logger.info(f"   🎯 Found {len(heading_jobs)} jobs from heading format")
-                    jobs.extend(heading_jobs)
+            heading_jobs = self._extract_jobs_from_headings(soup)
+            if heading_jobs:
+                logger.info(f"   🎯 Found {len(heading_jobs)} jobs from heading format")
+                jobs.extend(heading_jobs)
             
             # Filter out non-job content (benefits, culture, etc.)
             filtered_jobs = self._filter_real_jobs(jobs)

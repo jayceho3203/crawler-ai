@@ -103,15 +103,29 @@ class CareerPagesService:
             for el in soup.find_all(tag):
                 _push(el.get(attr))
         
-        # Extract from inline scripts/styles
+        # Extract from inline scripts/styles and JSON data
         inline_texts = []
         for el in soup.find_all(['script', 'style']):
             if el.string:
                 inline_texts.append(el.string)
         
+        # Also extract from all text content for JSON data
+        all_text = soup.get_text()
+        inline_texts.append(all_text)
+        
         blob = '\n'.join(inline_texts)
-        for m in re.finditer(r'https?://([A-Za-z0-9\-\._~%]+)(?:[:/][^\s\'"]*)?', blob):
-            hosts.add(m.group(1).lower())
+        
+        # Enhanced regex to find URLs in JSON and other formats
+        url_patterns = [
+            r'https?://([A-Za-z0-9\-\._~%]+)(?:[:/][^\s\'"]*)?',  # Standard URLs
+            r'"url":\s*"https?://([A-Za-z0-9\-\._~%]+)',  # JSON url fields
+            r'"href":\s*"https?://([A-Za-z0-9\-\._~%]+)',  # JSON href fields
+            r'https?://([A-Za-z0-9\-\._~%]+)\.com\.vn',  # Vietnamese domains
+        ]
+        
+        for pattern in url_patterns:
+            for m in re.finditer(pattern, blob, re.IGNORECASE):
+                hosts.add(m.group(1).lower())
         
         return hosts
     
@@ -126,10 +140,12 @@ class CareerPagesService:
         try:
             logger.info(f"🔍 Starting career page detection for: {url}")
             
-            # Temporarily disable Scrapy due to project settings issues
+            # Choose crawling method
             if use_scrapy:
-                logger.info("⚠️ Scrapy temporarily disabled, using requests fallback")
-                use_scrapy = False
+                logger.info("🕷️ Using Scrapy for career page detection")
+                return await self._detect_career_pages_scrapy(url, max_pages_to_scan)
+            else:
+                logger.info("🔄 Using requests fallback method")
             
             # Use requests-based method
             logger.info("🔄 Using requests-based crawling method")
@@ -329,6 +345,14 @@ class CareerPagesService:
             
             # IMPROVED SCORING SYSTEM (Cách 1)
             career_indicators = []
+            
+            # 0. SUBDOMAIN CAREER DETECTION (HIGHEST PRIORITY)
+            if domain.startswith('career.') or domain.startswith('careers.') or domain.startswith('jobs.'):
+                career_indicators.append(f"Career subdomain: {domain}")
+                analysis['confidence'] += 2.0  # Very high confidence for career subdomains
+                analysis['is_career_page'] = True
+                analysis['indicators'] = career_indicators
+                return analysis
             
             # 1. Exact career keywords (HIGHEST WEIGHT)
             exact_career_keywords = ['career', 'careers', 'jobs', 'employment', 'tuyen-dung', 'viec-lam', 'co-hoi-nghe-nghiep', 'tuyen-nhan-vien']
@@ -763,6 +787,16 @@ class CareerPagesService:
             potential_career_pages = []
             rejected_urls = []
             
+            # Add subdomain search for career pages
+            logger.info(f"   🔍 Starting subdomain search for: {url}")
+            subdomain_results = await self._search_subdomains(url, False)  # Use non-strict filtering
+            logger.info(f"   📊 Subdomain search results: {len(subdomain_results['career_pages'])} career pages, {len(subdomain_results['potential_pages'])} potential pages")
+            
+            # Merge subdomain results
+            career_pages.extend(subdomain_results['career_pages'])
+            potential_career_pages.extend(subdomain_results['potential_pages'])
+            career_page_analysis.extend(subdomain_results['analysis'])
+            
             # Calculate confidence score
             confidence_score = self._calculate_confidence_score(
                 len(career_pages), 
@@ -898,11 +932,10 @@ class CareerPagesService:
         # Dedup early
         subdomains = sorted(set(subdomains))
         
-        # 3) Minimal fallback (ONLY IF NEEDED; NO hardcoding in code)
-        if not subdomains:
-            fallback = self._get_minimal_fallback_patterns(root_domain)
-            subdomains.extend(fallback)
-            logger.info(f"   ⚠️ Using minimal fallback: {len(fallback)} patterns")
+        # 3) Always add essential career subdomains (ALWAYS TRY THESE)
+        fallback = self._get_minimal_fallback_patterns(root_domain)
+        subdomains.extend(fallback)
+        logger.info(f"   🔧 Always trying essential career subdomains: {len(fallback)} patterns")
         
         # Final dedup
         final_subdomains = sorted(set(subdomains))
@@ -1038,17 +1071,20 @@ class CareerPagesService:
     
     def _get_minimal_fallback_patterns(self, domain: str) -> List[str]:
         """
-        NO hardcoding in code - read from ENV or config
+        Minimal fallback patterns including essential career subdomains
         """
+        # Essential career subdomains (always include)
+        career_subdomains = ['career', 'careers', 'jobs', 'tuyen-dung', 'viec-lam']
+        
         # Read from environment variable
         raw = os.getenv("CRAWLER_FALLBACK_SUBDOMAINS", "").strip()
-        if not raw:
-            logger.info(f"   ℹ️ No fallback patterns configured - returning empty list")
-            return []
+        if raw:
+            # Parse comma-separated patterns
+            env_tags = [t.strip().lower() for t in raw.split(',') if t.strip()]
+            career_subdomains.extend(env_tags)
         
-        # Parse comma-separated patterns
-        tags = [t.strip().lower() for t in raw.split(',') if t.strip()]
-        urls = [f"https://{t}.{domain}" for t in tags]
+        # Create URLs
+        urls = [f"https://{t}.{domain}" for t in career_subdomains]
         
-        logger.info(f"   🔧 Using fallback patterns from ENV: {tags}")
+        logger.info(f"   🔧 Using fallback patterns: {career_subdomains}")
         return urls 
