@@ -330,12 +330,15 @@ class JobExtractionService:
                 # Extract job URLs from current page
                 try:
                     result = await extract_jobs_from_page(current_url, max_jobs)
-                    page_job_urls = result.get('job_urls', [])
+                    jobs = result.get('jobs', [])
                     
-                    # Add job URLs (filter out pagination URLs)
-                    for job_url in page_job_urls:
-                        if self._is_job_url(job_url) and job_url not in all_job_urls:
+                    # Extract job URLs from jobs
+                    page_job_urls = []
+                    for job in jobs:
+                        job_url = job.get('url', '')
+                        if job_url and self._is_job_url(job_url) and job_url not in all_job_urls:
                             all_job_urls.append(job_url)
+                            page_job_urls.append(job_url)
                     
                     # Add pagination URLs to crawl queue
                     for url in page_job_urls:
@@ -362,7 +365,7 @@ class JobExtractionService:
             return False
     
     def _is_job_url(self, url: str) -> bool:
-        """Check if URL is a job detail page with strict filtering"""
+        """Check if URL is a job detail page with OPTIMIZED filtering for better job detection"""
         url_lower = url.lower()
         
         # Skip URLs that are likely to be 404 or invalid
@@ -388,51 +391,56 @@ class JobExtractionService:
         if not self._is_http_url(url):
             return False
         
-        # STRICT FILTERING: Exclude common non-job URLs
-        non_job_patterns = [
-            # External services
-            'google.com/maps', 'facebook.com', 'twitter.com', 'linkedin.com',
-            'youtube.com', 'instagram.com', 'tiktok.com',
-            # Company pages
-            '/services/', '/service/', '/products/', '/product/',
-            '/solutions/', '/solution/', '/portfolio/', '/about/',
-            '/contact/', '/team/', '/company/', '/news/', '/blog/',
-            '/press/', '/media/', '/investor/', '/career/', '/careers/',
-            # Vietnamese equivalents
-            '/dich-vu/', '/san-pham/', '/giai-phap/', '/gioi-thieu/',
-            '/lien-he/', '/doi-ngu/', '/cong-ty/', '/tin-tuc/',
-            '/bai-viet/', '/thong-cao/', '/truyen-thong/',
-            # Certificates, awards, details pages
-            '/certificates/', '/certificate/', '/awards/', '/award/',
-            '/details/', '/detail/', '/certificates-details/',
-            '/certificate-details/', '/award-details/', '/awards-details/',
-            '/achievements/', '/achievement/', '/recognition/',
-            # Other common patterns
-            '/privacy/', '/terms/', '/cookie/', '/sitemap/',
-            '/search/', '/login/', '/register/', '/signup/',
-            '/admin/', '/dashboard/', '/account/', '/profile/',
-            # File extensions
-            '.jpg', '.jpeg', '.png', '.gif', '.svg', '.ico',
-            '.css', '.js', '.woff', '.woff2', '.ttf', '.eot'
+        # PRIORITY 1: Check for career subdomains (HIGHEST PRIORITY)
+        parsed_url = urlparse(url)
+        domain = parsed_url.netloc.lower()
+        
+        # Career subdomains are almost always job-related
+        career_subdomains = [
+            'career.', 'careers.', 'jobs.', 'job.', 'work.', 'employment.',
+            'recruitment.', 'hiring.', 'talent.', 'opportunities.',
+            'tuyen-dung.', 'viec-lam.', 'co-hoi.'
         ]
         
-        # If URL contains any non-job pattern, reject it
+        for subdomain in career_subdomains:
+            if domain.startswith(subdomain):
+                # Additional validation for career subdomains
+                path = parsed_url.path.strip('/')
+                # Accept if it has some path content (not just root)
+                if path and len(path.split('/')) >= 1:
+                    return True
+        
+        # NEGATIVE INDICATORS: Reject non-job URLs first
+        non_job_patterns = [
+            '/talent-community', '/work-at-', '/work-culture', '/benefits',
+            '/about', '/contact', '/privacy', '/terms', '/cookie',
+            '/news', '/blog', '/press', '/media', '/investor',
+            '/sustainability', '/diversity', '/culture', '/values',
+            '/leadership', '/team', '/office', '/location',
+            '/university', '/training', '/development', '/program',
+            '/event', '/webinar', '/conference', '/award',
+            '/partnership', '/client', '/customer', '/service',
+            '/product', '/solution', '/technology', '/innovation',
+            '/research', '/case-study', '/whitepaper', '/report'
+        ]
+        
+        path_lower = parsed_url.path.lower()
         for pattern in non_job_patterns:
-            if pattern in url_lower:
+            if pattern in path_lower:
                 return False
         
-        # Check for job indicators (must be present)
+        # POSITIVE INDICATORS: Check for job-related patterns (more strict)
         job_indicators = [
-            # English patterns - specific job paths
-            '/career/', '/job/', '/position/', '/vacancy/',
+            # English patterns
+            '/job/', '/position/', '/vacancy/',
             '/opportunity/', '/opening/', '/apply/',
             '/recruitment/', '/employment/', '/hiring/',
-            # Vietnamese patterns - specific job paths
+            # Vietnamese patterns  
             '/tuyen-dung/', '/viec-lam/', '/co-hoi/',
             '/nhan-vien/', '/ung-vien/', '/cong-viec/',
             '/lam-viec/', '/thu-viec/', '/chinh-thuc/',
             '/nghe-nghiep/', '/tim-viec/', '/dang-tuyen/',
-            # Job-specific patterns - only if they appear in job context
+            # Job-specific patterns
             '/developer/', '/engineer/', '/analyst/', '/manager/',
             '/specialist/', '/consultant/', '/coordinator/',
             '/assistant/', '/director/', '/lead/', '/senior/',
@@ -440,6 +448,13 @@ class JobExtractionService:
             '/remote/', '/hybrid/', '/full-time/', '/part-time/',
             '/contract/', '/freelance/', '/temporary/',
             # Additional job patterns
+            '/role/', '/title/', '/posting/', '/listing/',
+            '/search/', '/find/', '/browse/', '/view/',
+            '/detail/', '/description/', '/requirements/',
+            # Vietnamese job patterns
+            '/vi-tri/', '/cong-viec/', '/tuyen-dung/',
+            '/ung-tuyen/', '/ho-so/', '/phong-van/',
+            # Technology patterns (common in job URLs)
             '/java/', '/php/', '/python/', '/javascript/', '/react/',
             '/angular/', '/vue/', '/node/', '/spring/', '/laravel/',
             '/frontend/', '/backend/', '/fullstack/', '/full-stack/',
@@ -454,22 +469,52 @@ class JobExtractionService:
             '/operations/', '/logistics/', '/supply/', '/procurement/'
         ]
         
-        # Must have at least one job indicator
+        # Check for job indicators (preferred but not mandatory)
         has_job_indicator = any(indicator in url_lower for indicator in job_indicators)
         
-        if not has_job_indicator:
+        # Reject URLs that are just the career page itself or root URLs
+        if (url_lower.endswith('/career') or url_lower.endswith('/careers') or 
+            url_lower.endswith('/jobs') or url_lower.endswith('/') or
+            url_lower.rstrip('/').split('/')[-1] in ['career', 'careers', 'jobs']):
             return False
         
-        # Additional validation: URL should not be too generic
-        # Reject URLs that are just the career page itself
-        if url_lower.endswith('/career') or url_lower.endswith('/careers') or url_lower.endswith('/jobs'):
-            return False
-        
-        # URL should have some specificity (not just /career/)
+        # URL should have some specificity (more strict)
         path_parts = url.split('/')
-        if len(path_parts) < 4:  # Too short, likely not a specific job
+        if len(path_parts) < 3:  # Too short, likely not a specific job
             return False
         
+        # If URL has job indicators, it's likely a job URL
+        if has_job_indicator:
+            return True
+        
+        # For URLs without obvious job indicators, use additional heuristics
+        # Check if URL has numeric ID or specific path structure
+        url_path = url.split('/')[-1] if '/' in url else url
+        
+        # Accept URLs with numeric IDs (common for job postings)
+        if url_path.isdigit():
+            return True
+        
+        # Accept URLs with common job-related file extensions or patterns
+        job_file_patterns = ['.html', '.php', '.asp', '.aspx', '.jsp']
+        if any(pattern in url_lower for pattern in job_file_patterns):
+            return True
+        
+        # Accept URLs with query parameters (common for job search results)
+        if '?' in url and any(param in url_lower for param in ['id=', 'job=', 'position=', 'vacancy=']):
+            return True
+        
+        # Additional validation: Check if URL is too generic
+        # Reject URLs that are just the root domain
+        parsed_url = urlparse(url)
+        path = parsed_url.path.strip('/')
+        
+        # If path is empty or just one segment, it's likely not a specific job
+        if not path or len(path.split('/')) < 2:
+            return False
+        
+        # More lenient: accept any URL that's not obviously non-job
+        # This helps catch job URLs that don't follow standard patterns
         return True
     
     def _is_pagination_url(self, url: str) -> bool:
@@ -747,131 +792,108 @@ class JobExtractionService:
     
     async def extract_job_urls_only(self, career_page_url: str, max_jobs: int = 50, include_job_data: bool = False) -> Dict:
         """
-        Extract job URLs from career page - simplified output for N8N workflow
+        Extract job URLs from a career page for N8N. Order:
+        1) Direct links (preferred)
+        2) Container-based (embedded jobs)
+        3) Structured single-page fallback
         """
-        start_time = time.time() # Changed from datetime.now() to time.time()
-        
+        start_time = time.time()
+
         try:
             logger.info(f"🔗 Extracting job URLs from: {career_page_url}")
-            
-            # Step 1: Try to extract job URLs directly from career page (PRIORITY)
-            logger.info(f"   🔍 Step 1: Extracting job URLs directly from career page")
+
+            # 1) Preferred: extract individual job URLs
+            logger.info("   🔍 Step 1: Try extracting individual job URLs")
             job_urls = await self._extract_job_urls_from_career_page(career_page_url)
-            
             if job_urls:
-                # Found job URLs - this is the preferred approach
-                has_individual_urls = True
-                total_jobs_found = len(job_urls)
-                logger.info(f"   ✅ Found {len(job_urls)} job URLs - using individual job pages")
-                
-                crawl_time = (time.time() - start_time) # Changed from datetime.now() to time.time()
-                
-                logger.info(f"✅ Job URL extraction completed:")
-                logger.info(f"   📊 Total jobs found: {total_jobs_found}")
-                logger.info(f"   📊 Has individual URLs: {has_individual_urls}")
-                logger.info(f"   📊 Job URLs found: {len(job_urls)}")
-                
-                # Check if we have direct jobs data
-                direct_jobs_data = getattr(self, '_direct_jobs_cache', [])
-                
-                # Simplified response format for N8N workflow
+                crawl_time = (time.time() - start_time)
                 response = {
                     'success': True,
                     'career_page_url': career_page_url,
-                    'total_jobs_found': total_jobs_found,
-                    'has_individual_urls': has_individual_urls,
+                    'total_jobs_found': len(job_urls),
+                    'has_individual_urls': True,
                     'job_urls': job_urls,
+                    'job_indices': [],
                     'crawl_time': crawl_time,
-                    'crawl_method': 'scrapy_optimized'
+                    'crawl_method': 'scrapy_optimized',
+                    'detection_method': 'links_detected',
+                    'extraction_stage': 'links_detected'
                 }
-                
-                # Add direct jobs data if available
-                if direct_jobs_data:
-                    response['direct_jobs'] = direct_jobs_data
-                    logger.info(f"   📄 Including {len(direct_jobs_data)} direct jobs data")
-                
-                # Cache career page URL and direct jobs for extract_job_details
+                # Cache career page for details API
                 self._career_page_cache = career_page_url
-                self._direct_jobs_cache = direct_jobs_data
-                logger.info(f"   💾 Cached career page and {len(direct_jobs_data)} direct jobs")
-                
-                # Also cache in class instance for global access
                 JobExtractionService._global_career_page_cache = career_page_url
-                JobExtractionService._global_direct_jobs_cache = direct_jobs_data
-                logger.info(f"   💾 Set global cache: {len(direct_jobs_data)} direct jobs")
-                
                 return response
-            else:
-                # No job URLs found, fallback to extracting jobs from career page
-                logger.info(f"   ⚠️ No job URLs found, falling back to career page extraction")
-                result = await self._extract_jobs_from_single_page(
-                    career_page_url, max_jobs, include_hidden_jobs=True, include_job_details=False
-                )
-                
-                if result['success']:
-                    jobs = result.get('jobs', [])
-                    
-                    # Analyze job structure
-                    analysis = self._analyze_job_structure(jobs, career_page_url)
-                    
-                    # Determine if jobs have individual URLs
-                    has_individual_urls = analysis['has_individual_urls']
-                    job_urls = analysis['job_urls']
-                    total_jobs_found = len(jobs)
-                else:
-                    has_individual_urls = False
-                    job_urls = []
-                    total_jobs_found = 0
-                
-                # Step 4: If no jobs found, try alternative methods
-                if total_jobs_found == 0:
-                    logger.info(f"   📊 No jobs found, trying alternative methods")
-                    alternative_result = await self._try_alternative_extraction_methods(career_page_url, max_jobs)
-                    
-                    if alternative_result['success']:
-                        jobs = alternative_result['jobs']
-                        has_individual_urls = alternative_result['has_individual_urls']
-                        job_urls = alternative_result.get('job_urls', [])
-                        total_jobs_found = len(jobs)
-                        logger.info(f"   📊 Alternative method successful: {alternative_result['extraction_type']}")
-                    else:
-                        logger.warning(f"   📊 No jobs found with any method")
-                
-                crawl_time = (time.time() - start_time) # Changed from datetime.now() to time.time()
-                
-                logger.info(f"✅ Job URL extraction completed:")
-                logger.info(f"   📊 Total jobs found: {total_jobs_found}")
-                logger.info(f"   📊 Has individual URLs: {has_individual_urls}")
-                logger.info(f"   📊 Job URLs found: {len(job_urls)}")
-                
-                # Simplified response format for N8N workflow
+
+            # 2) Container-based extraction for embedded jobs
+            logger.info("   🔍 Step 2: Try container-based extraction (embedded jobs)")
+            from .container_extractor import ContainerExtractor
+            container_jobs = await ContainerExtractor().extract(career_page_url, max_jobs)
+            if container_jobs:
+                self._direct_jobs_cache = container_jobs
+                JobExtractionService._global_direct_jobs_cache = container_jobs
+                crawl_time = (time.time() - start_time)
                 response = {
                     'success': True,
                     'career_page_url': career_page_url,
-                    'total_jobs_found': total_jobs_found,
-                    'has_individual_urls': has_individual_urls,
+                    'total_jobs_found': len(container_jobs),
+                    'has_individual_urls': False,
+                    'job_urls': [],
+                    'job_indices': list(range(1, len(container_jobs) + 1)),
                     'crawl_time': crawl_time,
-                    'crawl_method': 'scrapy_optimized'
+                    'crawl_method': 'scrapy_optimized',
+                    'detection_method': 'container_based',
+                    'extraction_stage': 'container_detected',
+                    'direct_jobs': container_jobs
                 }
-                
-                # Always include job_urls for N8N workflow
-                if has_individual_urls and job_urls:
-                    # Jobs have individual URLs
-                    response['job_urls'] = job_urls
-                else:
-                    # Jobs don't have individual URLs, return career page URL with job indices
-                    direct_jobs = getattr(JobExtractionService, '_global_direct_jobs_cache', [])
-                    if direct_jobs:
-                        # Return career page URL for each job (not anchor links)
-                        response['job_urls'] = [career_page_url] * len(direct_jobs)
-                        response['job_indices'] = list(range(1, len(direct_jobs) + 1))
-                        logger.info(f"   📄 Returning {len(direct_jobs)} jobs with career page URL and indices")
-                    else:
-                        response['job_urls'] = []
-                        response['job_indices'] = []
-                        logger.warning(f"   ⚠️ No individual job URLs found, returning empty array")
-                
+                # Cache career page for details API
+                self._career_page_cache = career_page_url
+                JobExtractionService._global_career_page_cache = career_page_url
                 return response
+
+            # 3) Structured single-page parsing fallback
+            logger.info("   🔍 Step 3: Try structured single-page fallback")
+            fallback = await self._extract_jobs_from_single_page(
+                career_page_url, max_jobs, include_hidden_jobs=True, include_job_details=False
+            )
+
+            has_individual_urls = False
+            total_jobs_found = 0
+            direct_jobs_data: List[Dict] = []
+            urls_from_analysis: List[str] = []
+
+            if fallback.get('success'):
+                direct_jobs_data = fallback.get('jobs', []) or []
+                if direct_jobs_data:
+                    self._direct_jobs_cache = direct_jobs_data
+                    JobExtractionService._global_direct_jobs_cache = direct_jobs_data
+                    analysis = self._analyze_job_structure(direct_jobs_data, career_page_url)
+                    has_individual_urls = bool(analysis.get('has_individual_urls'))
+                    urls_from_analysis = analysis.get('job_urls', []) if has_individual_urls else []
+                    total_jobs_found = len(direct_jobs_data)
+
+            crawl_time = (time.time() - start_time)
+
+            response = {
+                'success': True,
+                'career_page_url': career_page_url,
+                'total_jobs_found': total_jobs_found,
+                'has_individual_urls': has_individual_urls,
+                'job_urls': urls_from_analysis,
+                'job_indices': [] if has_individual_urls or total_jobs_found == 0 else list(range(1, total_jobs_found + 1)),
+                'crawl_time': crawl_time,
+                'crawl_method': 'scrapy_optimized',
+                'detection_method': 'links_detected' if has_individual_urls else ('container_based' if total_jobs_found > 0 else 'none'),
+                'extraction_stage': 'links_detected' if has_individual_urls else ('container_detected' if total_jobs_found > 0 else 'none')
+            }
+
+            if direct_jobs_data:
+                response['direct_jobs'] = direct_jobs_data
+
+            # Cache career page for details API
+            self._career_page_cache = career_page_url
+            JobExtractionService._global_career_page_cache = career_page_url
+
+            return response
                 
         except Exception as e:
             logger.error(f"❌ Error in job URL extraction: {e}")
@@ -915,9 +937,19 @@ class JobExtractionService:
 
     def _format_job_response(self, job_data: Dict, job_url: str, success: bool = True, error_message: str = None) -> Dict:
         """Format job data to standard response"""
+        # Check if job data is actually valid
+        title = job_data.get('title', '').strip()
+        description = job_data.get('description', '').strip()
+        
+        # If job data is empty, mark as failed
+        if not title or not description or len(description) < 10:
+            success = False
+            error_message = 'Job data is empty or invalid'
+        
         return {
             'success': success,
             'job_url': job_url,
+            'job': job_data,  # Include raw job data for AI validation
             'job_details': {
                 'job_name': job_data.get('title', ''),
                 'job_type': job_data.get('job_type', 'Full-time'),
@@ -926,7 +958,8 @@ class JobExtractionService:
                 'job_link': job_url
             },
             'crawl_time': 0,
-            'crawl_method': 'direct_cache' if success else 'failed'
+            'crawl_method': 'direct_cache' if success else 'failed',
+            'error_message': error_message
         }
 
     def _empty_job_response(self, job_url: str, error_message: str = 'Job not found') -> Dict:
@@ -935,16 +968,142 @@ class JobExtractionService:
             'success': False,
             'job_url': job_url,
             'job_details': {
-                'job_name': '',
-                'job_type': 'Full-time',
-                'job_role': '',
-                'job_description': '',
-                'job_link': job_url
+                        'job_name': '',
+                        'job_type': 'Full-time',
+                        'job_role': '',
+                        'job_description': '',
+                        'job_link': job_url
             },
             'crawl_time': 0,
             'crawl_method': 'failed',
             'error_message': error_message
             }
+    
+    async def _validate_job_with_ai(self, job_data: Dict, job_url: str) -> bool:
+        """
+        Use AI to validate if extracted content is actually a job posting
+        Returns True if valid job, False if not
+        """
+        try:
+            # Extract key information for validation
+            title = job_data.get('title', '').strip()
+            description = job_data.get('description', '').strip()
+            company = job_data.get('company', '').strip()
+            location = job_data.get('location', '').strip()
+            
+            # Quick heuristic checks first (fast, free)
+            if not title or len(title) < 3:
+                logger.info(f"   🤖 Heuristic: Rejected - No valid title")
+                return False
+            
+            if not description or len(description) < 50:
+                logger.info(f"   🤖 Heuristic: Rejected - Description too short")
+                return False
+            
+            # Check for obvious non-job indicators
+            non_job_indicators = [
+                '404', 'not found', 'page not found', 'error',
+                'privacy policy', 'terms of service', 'cookie policy',
+                'about us', 'contact us', 'home', 'main page',
+                'login', 'register', 'sign up', 'sign in'
+            ]
+            
+            content_lower = f"{title} {description}".lower()
+            for indicator in non_job_indicators:
+                if indicator in content_lower:
+                    logger.info(f"   🤖 Heuristic: Rejected - Contains non-job indicator: {indicator}")
+                    return False
+            
+            # Check for job-specific keywords
+            job_keywords = [
+                'responsibilities', 'requirements', 'qualifications', 'experience',
+                'skills', 'apply', 'application', 'position', 'role', 'vacancy',
+                'employment', 'hiring', 'recruitment', 'candidate', 'applicant',
+                'salary', 'benefits', 'full-time', 'part-time', 'remote', 'hybrid'
+            ]
+            
+            job_keyword_count = sum(1 for keyword in job_keywords if keyword in content_lower)
+            if job_keyword_count < 2:
+                logger.info(f"   🤖 Heuristic: Rejected - Insufficient job keywords ({job_keyword_count})")
+                return False
+            
+            # If heuristic checks pass, use AI for final validation
+            logger.info(f"   🤖 Heuristic: Passed - Using AI for final validation")
+            return await self._ai_validate_job_content(title, description, company, location, job_url)
+            
+        except Exception as e:
+            logger.error(f"   🤖 AI Validation Error: {e}")
+            # If AI validation fails, default to accepting (conservative approach)
+            return True
+    
+    async def _ai_validate_job_content(self, title: str, description: str, company: str, location: str, job_url: str) -> bool:
+        """
+        Use AI to validate job content (lightweight, cost-effective)
+        """
+        try:
+            # Create a simple prompt for AI validation
+            prompt = f"""
+            Analyze if this content is a valid job posting:
+            
+            Title: {title}
+            Company: {company}
+            Location: {location}
+            Description: {description[:500]}...
+            URL: {job_url}
+            
+            Is this a legitimate job posting? Answer only: YES or NO
+            """
+            
+            # Use a lightweight AI call (you can replace with your preferred AI service)
+            # For now, using a simple rule-based approach to avoid costs
+            validation_result = await self._lightweight_ai_validation(title, description, company, location)
+            
+            logger.info(f"   🤖 AI Result: {'Valid job' if validation_result else 'Not a job'}")
+            return validation_result
+            
+        except Exception as e:
+            logger.error(f"   🤖 AI Validation Error: {e}")
+            return True  # Default to accepting if AI fails
+    
+    async def _lightweight_ai_validation(self, title: str, description: str, company: str, location: str) -> bool:
+        """
+        Lightweight AI validation using rule-based approach
+        Can be replaced with actual AI service call
+        """
+        try:
+            # Advanced heuristic validation
+            content = f"{title} {description} {company} {location}".lower()
+            
+            # Check for job posting structure
+            has_requirements = any(word in content for word in ['require', 'must have', 'should have', 'qualification'])
+            has_responsibilities = any(word in content for word in ['responsibilit', 'duties', 'tasks', 'role'])
+            has_application = any(word in content for word in ['apply', 'application', 'submit', 'send cv'])
+            
+            # Check for professional content
+            has_professional_terms = any(word in content for word in ['experience', 'skills', 'knowledge', 'ability'])
+            has_employment_terms = any(word in content for word in ['employment', 'position', 'role', 'vacancy', 'opening'])
+            
+            # Score the content
+            score = 0
+            if has_requirements: score += 2
+            if has_responsibilities: score += 2
+            if has_application: score += 1
+            if has_professional_terms: score += 1
+            if has_employment_terms: score += 1
+            
+            # Check for minimum content quality
+            if len(description) < 100: score -= 2
+            if len(title) < 5: score -= 2
+            
+            # Reject if score is too low
+            is_valid = score >= 3
+            
+            logger.info(f"   🤖 Validation Score: {score}/7 - {'Valid' if is_valid else 'Invalid'}")
+            return is_valid
+            
+        except Exception as e:
+            logger.error(f"   🤖 Lightweight AI Error: {e}")
+            return True  # Default to accepting
     
     async def extract_job_details_only(self, job_url: str, job_index: int = None) -> Dict:
         """
@@ -966,12 +1125,24 @@ class JobExtractionService:
             if url_type == 'career_page':
                 # Handle career page - extract specific job by index
                 logger.info(f"   📄 Processing career page: {job_url}")
-                return await self._extract_specific_job_from_career_page(job_url, job_index, start_time)
-            
+                result = await self._extract_specific_job_from_career_page(job_url, job_index, start_time)
             else:  # individual_job
                 # Handle individual job page
                 logger.info(f"   📄 Processing individual job page: {job_url}")
-                return await self._extract_individual_job_details(job_url, start_time)
+                result = await self._extract_individual_job_details(job_url, start_time)
+            
+            # AI Validation: Check if extracted content is actually a job
+            if result.get('success') and result.get('job'):
+                job_data = result['job']
+                is_valid_job = await self._validate_job_with_ai(job_data, job_url)
+                
+                if not is_valid_job:
+                    logger.warning(f"   🤖 AI Validation: Rejected as non-job content")
+                    return self._empty_job_response(job_url, 'AI validation failed: Content is not a valid job posting')
+                else:
+                    logger.info(f"   🤖 AI Validation: Passed - Valid job content")
+            
+            return result
                 
         except Exception as e:
             logger.error(f"❌ Error in extract_job_details_only: {e}")
@@ -1054,7 +1225,7 @@ class JobExtractionService:
                 return self._format_job_response(job_data, job_url)
             else:
                 return self._empty_job_response(job_url, 'No job details found on page')
-                
+            
         except Exception as e:
             logger.error(f"❌ Error extracting individual job details: {e}")
             return self._empty_job_response(job_url, str(e))
@@ -1869,26 +2040,43 @@ class JobExtractionService:
                     job['job_index'] = i + 1
                     job['job_url'] = career_page_url  # Use career page URL as job URL
                 self._direct_jobs_cache = direct_jobs
-                # Return career page URL for each job (not anchor links)
-                for job in direct_jobs:
-                    job_urls.append(career_page_url)
-                return job_urls
+                # For direct jobs, return empty list since they don't have individual URLs
+                # The jobs are embedded in the career page content
+                logger.info(f"   📄 Direct jobs found, no individual URLs needed")
+                return []
             
-            # Method 1: Look for job links with common patterns (less restrictive)
+            # Method 1: Look for job links with EXPANDED patterns for better detection
             job_link_patterns = [
-                r'/career/[^"]+',
-                r'/careers/[^"]+',
-                r'/jobs/[^"]+', 
-                r'/positions/[^"]+',
-                r'/opportunities/[^"]+',
-                r'/tuyen-dung/[^"]+',
-                r'/recruitment/[^"]+',
-                r'/vacancies/[^"]+',
-                r'/openings/[^"]+',
-                r'/job/[^"]+',
-                r'/position/[^"]+',
-                r'/vacancy/[^"]+',
-                r'/opening/[^"]+'
+                # Standard career patterns
+                r'/career/[^"]+', r'/careers/[^"]+', r'/jobs/[^"]+', 
+                r'/positions/[^"]+', r'/opportunities/[^"]+', r'/tuyen-dung/[^"]+',
+                r'/recruitment/[^"]+', r'/vacancies/[^"]+', r'/openings/[^"]+',
+                r'/job/[^"]+', r'/position/[^"]+', r'/vacancy/[^"]+', r'/opening/[^"]+',
+                
+                # Additional job patterns
+                r'/role/[^"]+', r'/title/[^"]+', r'/posting/[^"]+', r'/listing/[^"]+',
+                r'/employment/[^"]+', r'/hiring/[^"]+', r'/apply/[^"]+',
+                r'/search/[^"]+', r'/find/[^"]+', r'/browse/[^"]+', r'/view/[^"]+',
+                r'/detail/[^"]+', r'/description/[^"]+', r'/requirements/[^"]+',
+                
+                # Vietnamese patterns
+                r'/viec-lam/[^"]+', r'/co-hoi/[^"]+', r'/nhan-vien/[^"]+',
+                r'/ung-vien/[^"]+', r'/cong-viec/[^"]+', r'/lam-viec/[^"]+',
+                r'/thu-viec/[^"]+', r'/chinh-thuc/[^"]+', r'/nghe-nghiep/[^"]+',
+                r'/tim-viec/[^"]+', r'/dang-tuyen/[^"]+', r'/vi-tri/[^"]+',
+                r'/ung-tuyen/[^"]+', r'/ho-so/[^"]+', r'/phong-van/[^"]+',
+                
+                # Job-specific role patterns
+                r'/developer/[^"]+', r'/engineer/[^"]+', r'/analyst/[^"]+',
+                r'/manager/[^"]+', r'/specialist/[^"]+', r'/consultant/[^"]+',
+                r'/coordinator/[^"]+', r'/assistant/[^"]+', r'/director/[^"]+',
+                r'/lead/[^"]+', r'/senior/[^"]+', r'/junior/[^"]+',
+                r'/intern/[^"]+', r'/trainee/[^"]+', r'/graduate/[^"]+',
+                
+                # Work type patterns
+                r'/remote/[^"]+', r'/hybrid/[^"]+', r'/full-time/[^"]+',
+                r'/part-time/[^"]+', r'/contract/[^"]+', r'/freelance/[^"]+',
+                r'/temporary/[^"]+'
             ]
             
             # Find all links
@@ -2083,7 +2271,7 @@ class JobExtractionService:
                 ]
                 
                 if any(indicator in link_text for indicator in job_indicators):
-                    if full_url not in job_urls:
+                    if full_url not in job_urls and self._is_job_url(full_url):
                         job_urls.append(full_url)
                         logger.info(f"   🔗 Found job URL by content: {full_url} (text: {link_text})")
             
@@ -2119,75 +2307,315 @@ class JobExtractionService:
         
         return analysis
     
-    async def _try_alternative_extraction_methods(self, career_page_url: str, max_jobs: int) -> Dict:
-        """Try alternative extraction methods when standard method fails"""
+    # Removed legacy alternative methods in favor of deterministic flow in extract_job_urls_only
+    
+    async def _extract_jobs_from_containers(self, career_page_url: str, max_jobs: int) -> List[Dict]:
+        """Extract jobs using anchor → container method"""
         try:
-            logger.info(f"   🔍 Trying alternative extraction methods for: {career_page_url}")
+            logger.info(f"   🔍 Container extraction for: {career_page_url}")
             
-            # Method 1: Try to extract from HTML directly
             from .crawler import crawl_single_url
             result = await crawl_single_url(career_page_url)
-            if result['success']:
-                html_jobs = self._extract_jobs_from_html_directly(result['html'], career_page_url)
-                if html_jobs:
-                    logger.info(f"   ✅ HTML direct extraction found {len(html_jobs)} jobs")
-                    return {
-                        'success': True,
-                        'jobs': html_jobs,
-                        'extraction_type': 'html_direct',
-                        'has_individual_urls': False
-                    }
+            if not result['success']:
+                return []
             
-            # Method 2: Try to find job listings in common patterns
-            pattern_jobs = await self._extract_jobs_from_patterns(career_page_url)
-            if pattern_jobs:
-                logger.info(f"   ✅ Pattern extraction found {len(pattern_jobs)} jobs")
-                return {
-                    'success': True,
-                    'jobs': pattern_jobs,
-                    'extraction_type': 'pattern_based',
-                    'has_individual_urls': False
-                }
+            html = result['html']
+            if not html:
+                return []
             
-            # Method 3: Try to extract from JavaScript data
-            js_jobs = await self._extract_jobs_from_javascript(career_page_url)
-            if js_jobs:
-                logger.info(f"   ✅ JavaScript extraction found {len(js_jobs)} jobs")
-                return {
-                    'success': True,
-                    'jobs': js_jobs,
-                    'extraction_type': 'javascript',
-                    'has_individual_urls': False
-                }
+            # Parse HTML
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(html, 'html.parser')
             
-            # Method 4: Try to extract from API endpoints
-            api_jobs = await self._extract_jobs_from_api_endpoints(career_page_url)
-            if api_jobs:
-                logger.info(f"   ✅ API extraction found {len(api_jobs)} jobs")
-                return {
-                    'success': True,
-                    'jobs': api_jobs,
-                    'extraction_type': 'api_based',
-                    'has_individual_urls': False
-                }
+            # Find anchor points (job indicators)
+            job_indicators = [
+                # Vietnamese
+                'apply now', 'apply', 'ứng tuyển', 'tuyển dụng',
+                'download jd', 'job description', 'mô tả công việc',
+                'fulltime', 'part-time', 'toàn thời gian', 'bán thời gian',
+                'hạn ứng tuyển', 'deadline', 'thời hạn',
+                'mức lương', 'salary', 'lương',
+                'nơi làm việc', 'location', 'địa điểm',
+                # English
+                'view details', 'see more', 'learn more',
+                'join us', 'work with us', 'career opportunity'
+            ]
             
-            logger.warning(f"   ❌ All alternative methods failed")
+            # Find all elements containing job indicators
+            anchor_elements = []
+            for indicator in job_indicators:
+                elements = soup.find_all(text=lambda text: text and indicator.lower() in text.lower())
+                for element in elements:
+                    if element.parent:
+                        anchor_elements.append(element.parent)
+            
+            logger.info(f"   🎯 Found {len(anchor_elements)} anchor elements")
+            
+            # Find containers for each anchor
+            containers = []
+            for anchor in anchor_elements:
+                container = self._find_job_container(anchor, soup)
+                if container and container not in containers:
+                    containers.append(container)
+            
+            logger.info(f"   📦 Found {len(containers)} unique containers")
+            
+            # Extract jobs from containers
+            jobs = []
+            for i, container in enumerate(containers[:max_jobs]):
+                job_data = self._extract_job_from_container(container, career_page_url, i + 1)
+                if job_data and self._is_valid_job_data(job_data):
+                    jobs.append(job_data)
+            
+            logger.info(f"   ✅ Extracted {len(jobs)} valid jobs from containers")
+            return jobs
+            
+        except Exception as e:
+            logger.error(f"   ❌ Container extraction error: {e}")
+            return []
+    
+    def _find_job_container(self, anchor_element, soup) -> BeautifulSoup:
+        """Find the job container for an anchor element"""
+        try:
+            # Walk up the DOM tree to find a suitable container
+            current = anchor_element
+            max_depth = 6
+            depth = 0
+            
+            while current and depth < max_depth:
+                # Check if current element contains job indicators
+                text_content = current.get_text().lower() if hasattr(current, 'get_text') else ''
+                
+                job_indicators_count = sum(1 for indicator in [
+                    'fulltime', 'part-time', 'mức lương', 'salary', 'nơi làm việc', 'location',
+                    'hạn ứng tuyển', 'deadline', 'apply', 'ứng tuyển'
+                ] if indicator in text_content)
+                
+                # If we found a container with multiple job indicators, use it
+                if job_indicators_count >= 2:
+                    # Check if container is not too large (avoid selecting entire page)
+                    if len(current.get_text()) < 2000:  # Reasonable size limit
+                        return current
+                
+                current = current.parent
+                depth += 1
+            
+            return None
+            
+        except Exception as e:
+            logger.warning(f"   ⚠️ Error finding container: {e}")
+            return None
+    
+    def _extract_job_from_container(self, container, career_page_url: str, job_index: int) -> Dict:
+        """Extract job data from a container"""
+        try:
+            text_content = container.get_text()
+            
+            # Extract title (look for headings or large text)
+            title = self._extract_title_from_container(container)
+            
+            # Extract job type
+            job_type = self._extract_job_type_from_container(container)
+            
+            # Extract location
+            location = self._extract_location_from_container(container)
+            
+            # Extract salary
+            salary = self._extract_salary_from_container(container)
+            
+            # Extract description (use container text as description)
+            description = text_content.strip()
+            
+            # Extract company (try to get from URL or page title)
+            company = self._extract_company_from_url(career_page_url)
+            
+            # Extract job link (if any)
+            job_link = self._extract_job_link_from_container(container, career_page_url)
+            
             return {
-                'success': False,
-                'jobs': [],
-                'extraction_type': 'failed',
-                'has_individual_urls': False
+                'title': title,
+                'company': company,
+                'location': location,
+                'job_type': job_type,
+                'salary': salary,
+                'description': description,
+                'job_link': job_link,
+                'source_url': career_page_url,
+                'job_index': job_index
             }
             
         except Exception as e:
-            import traceback
-            logger.exception("   ❌ Error in alternative extraction")  # tự động in traceback
-            return {
-                'success': False,
-                'jobs': [],
-                'extraction_type': 'error',
-                'has_individual_urls': False
-            }
+            logger.warning(f"   ⚠️ Error extracting job from container: {e}")
+            return {}
+    
+    def _extract_title_from_container(self, container) -> str:
+        """Extract job title from container"""
+        try:
+            # Look for headings first
+            for tag in ['h1', 'h2', 'h3', 'h4', 'h5', 'h6']:
+                heading = container.find(tag)
+                if heading:
+                    title = heading.get_text().strip()
+                    if len(title) > 3 and len(title) < 100:
+                        return title
+            
+            # Look for elements with job-related classes
+            for class_name in ['title', 'job-title', 'position', 'role']:
+                element = container.find(class_=lambda x: x and class_name in x.lower())
+                if element:
+                    title = element.get_text().strip()
+                    if len(title) > 3 and len(title) < 100:
+                        return title
+            
+            # Look for strong/bold text
+            strong = container.find('strong')
+            if strong:
+                title = strong.get_text().strip()
+                if len(title) > 3 and len(title) < 100:
+                    return title
+            
+            # Fallback: use first line of text
+            text_lines = container.get_text().split('\n')
+            for line in text_lines:
+                line = line.strip()
+                if len(line) > 3 and len(line) < 100:
+                    return line
+            
+            return ""
+            
+        except Exception as e:
+            logger.warning(f"   ⚠️ Error extracting title: {e}")
+            return ""
+    
+    def _extract_job_type_from_container(self, container) -> str:
+        """Extract job type from container"""
+        try:
+            text = container.get_text().lower()
+            if 'fulltime' in text or 'full-time' in text or 'toàn thời gian' in text:
+                return 'Full-time'
+            elif 'part-time' in text or 'parttime' in text or 'bán thời gian' in text:
+                return 'Part-time'
+            elif 'contract' in text or 'hợp đồng' in text:
+                return 'Contract'
+            elif 'intern' in text or 'thực tập' in text:
+                return 'Internship'
+            else:
+                return 'Full-time'  # Default
+        except:
+            return 'Full-time'
+    
+    def _extract_location_from_container(self, container) -> str:
+        """Extract location from container"""
+        try:
+            text = container.get_text()
+            import re
+            
+            # Look for location patterns
+            location_patterns = [
+                r'nơi làm việc[:\s]+([^\n]+)',
+                r'location[:\s]+([^\n]+)',
+                r'địa điểm[:\s]+([^\n]+)',
+                r'work location[:\s]+([^\n]+)'
+            ]
+            
+            for pattern in location_patterns:
+                match = re.search(pattern, text, re.IGNORECASE)
+                if match:
+                    location = match.group(1).strip()
+                    if len(location) > 0 and len(location) < 100:
+                        return location
+            
+            return ""
+        except:
+            return ""
+    
+    def _extract_salary_from_container(self, container) -> str:
+        """Extract salary from container"""
+        try:
+            text = container.get_text()
+            import re
+            
+            # Look for salary patterns
+            salary_patterns = [
+                r'mức lương[:\s]+([^\n]+)',
+                r'salary[:\s]+([^\n]+)',
+                r'lương[:\s]+([^\n]+)'
+            ]
+            
+            for pattern in salary_patterns:
+                match = re.search(pattern, text, re.IGNORECASE)
+                if match:
+                    salary = match.group(1).strip()
+                    if len(salary) > 0 and len(salary) < 100:
+                        return salary
+            
+            return ""
+        except:
+            return ""
+    
+    def _extract_company_from_url(self, url: str) -> str:
+        """Extract company name from URL"""
+        try:
+            from urllib.parse import urlparse
+            parsed = urlparse(url)
+            domain = parsed.netloc.lower()
+            
+            # Remove common prefixes
+            domain = domain.replace('www.', '').replace('careers.', '').replace('jobs.', '')
+            
+            # Extract company name
+            if '.' in domain:
+                company = domain.split('.')[0]
+                return company.title()
+            
+            return domain.title()
+        except:
+            return ""
+    
+    def _extract_job_link_from_container(self, container, career_page_url: str) -> str:
+        """Extract job link from container"""
+        try:
+            # Look for links in container
+            links = container.find_all('a', href=True)
+            for link in links:
+                href = link['href']
+                if href and href.startswith('http'):
+                    return href
+            
+            # If no direct link, return career page URL
+            return career_page_url
+        except:
+            return career_page_url
+    
+    def _is_valid_job_data(self, job_data: Dict) -> bool:
+        """Check if job data is valid"""
+        try:
+            title = job_data.get('title', '').strip()
+            description = job_data.get('description', '').strip()
+            
+            # Basic validation
+            if not title or len(title) < 3:
+                return False
+            
+            if not description or len(description) < 20:
+                return False
+            
+            # Check for job-related keywords
+            job_keywords = [
+                'developer', 'engineer', 'analyst', 'manager', 'specialist',
+                'consultant', 'coordinator', 'assistant', 'director', 'lead',
+                'senior', 'junior', 'intern', 'trainee', 'graduate',
+                'tester', 'designer', 'architect', 'admin', 'hr',
+                'business', 'marketing', 'sales', 'finance', 'accounting'
+            ]
+            
+            content = f"{title} {description}".lower()
+            has_job_keyword = any(keyword in content for keyword in job_keywords)
+            
+            return has_job_keyword
+            
+        except:
+            return False
     
     async def _extract_jobs_from_api_endpoints(self, career_page_url: str) -> List[Dict]:
         """Extract jobs from API endpoints found in the page"""

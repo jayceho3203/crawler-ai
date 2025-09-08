@@ -276,7 +276,7 @@ class OptimizedCareerSpider(scrapy.Spider):
                 return True
         
         return False
-
+    
     def is_valid_link(self, link: str) -> bool:
         """
         Kiểm tra link có hợp lệ không với strict filtering
@@ -716,12 +716,12 @@ class OptimizedCareerSpider(scrapy.Spider):
 
     def extract_job_urls_from_career_page(self, response) -> List[str]:
         """
-        Extract job URLs from career page with strict filtering
+        Extract job URLs from career page with OPTIMIZED filtering for better job detection
         """
         job_urls = []
         url = response.url
         
-        # Find all links on the career page
+        # Method 1: Find all links on the career page
         links = response.css('a[href]::attr(href)').getall()
         
         for link in links:
@@ -731,10 +731,67 @@ class OptimizedCareerSpider(scrapy.Spider):
             # Normalize URL
             full_url = response.urljoin(link)
             
-            # Apply strict job URL filtering
+            # Apply optimized job URL filtering
             if self._is_job_url(full_url):
                 job_urls.append(full_url)
                 logger.info(f"   🔗 Found job URL: {full_url}")
+        
+        # Method 2: Look for job cards/sections with more specific selectors
+        job_card_selectors = [
+            'article',  # Common for job cards
+            '.job-card', '.jobcard', '.job-item', '.jobitem',
+            '.career-item', '.career-card', '.position-item',
+            '.vacancy-item', '.opportunity-item',
+            '[class*="job"]', '[class*="career"]', '[class*="position"]',
+            '[class*="vacancy"]', '[class*="opportunity"]',
+            '[class*="listing"]', '[class*="posting"]'
+        ]
+        
+        for selector in job_card_selectors:
+            try:
+                cards = response.css(selector)
+                for card in cards:
+                    # Extract links from job cards
+                    card_links = card.css('a[href]::attr(href)').getall()
+                    for link in card_links:
+                        if link:
+                            full_url = response.urljoin(link)
+                            if self._is_job_url(full_url) and full_url not in job_urls:
+                                job_urls.append(full_url)
+                                logger.info(f"   🔗 Found job URL from card: {full_url}")
+            except Exception as e:
+                logger.debug(f"   ⚠️ Error with selector {selector}: {e}")
+                continue
+        
+        # Method 3: Look for job-related text patterns in links
+        job_text_patterns = [
+            'developer', 'engineer', 'analyst', 'manager', 'specialist',
+            'consultant', 'coordinator', 'assistant', 'director', 'lead',
+            'senior', 'junior', 'intern', 'trainee', 'graduate',
+            'remote', 'hybrid', 'full-time', 'part-time', 'contract',
+            'freelance', 'temporary', 'position', 'role', 'vacancy',
+            'opening', 'opportunity', 'employment', 'hiring',
+            # Vietnamese patterns
+            'tuyen-dung', 'viec-lam', 'co-hoi', 'nhan-vien', 'ung-vien',
+            'cong-viec', 'lam-viec', 'thu-viec', 'chinh-thuc',
+            'nghe-nghiep', 'tim-viec', 'dang-tuyen', 'vi-tri'
+        ]
+        
+        # Get all links with their text
+        link_elements = response.css('a[href]')
+        for element in link_elements:
+            href = element.css('::attr(href)').get()
+            link_text = element.css('::text').get()
+            
+            if href and link_text:
+                link_text_lower = link_text.lower().strip()
+                
+                # Check if link text contains job-related keywords
+                if any(pattern in link_text_lower for pattern in job_text_patterns):
+                    full_url = response.urljoin(href)
+                    if self._is_job_url(full_url) and full_url not in job_urls:
+                        job_urls.append(full_url)
+                        logger.info(f"   🔗 Found job URL by text: {full_url} (text: {link_text})")
         
         # Remove duplicates and return
         unique_job_urls = list(set(job_urls))
@@ -744,7 +801,7 @@ class OptimizedCareerSpider(scrapy.Spider):
     
     def _is_job_url(self, url: str) -> bool:
         """
-        Check if URL is a job detail page with strict filtering
+        Check if URL is a job detail page with PRIORITY for career subdomains
         """
         url_lower = url.lower()
         
@@ -767,71 +824,107 @@ class OptimizedCareerSpider(scrapy.Spider):
         if not url.startswith(('http://', 'https://')):
             return False
         
-        # STRICT FILTERING: Exclude common non-job URLs
-        non_job_patterns = [
+        # PRIORITY 1: Check for career subdomains (HIGHEST PRIORITY)
+        from urllib.parse import urlparse
+        parsed_url = urlparse(url)
+        domain = parsed_url.netloc.lower()
+        
+        # Career subdomains are almost always job-related
+        career_subdomains = [
+            'career.', 'careers.', 'jobs.', 'job.', 'work.', 'employment.',
+            'recruitment.', 'hiring.', 'talent.', 'opportunities.',
+            'tuyen-dung.', 'viec-lam.', 'co-hoi.'
+        ]
+        
+        for subdomain in career_subdomains:
+            if domain.startswith(subdomain):
+                # Additional validation for career subdomains
+                path = parsed_url.path.strip('/')
+                # Accept if it has some path content (not just root)
+                if path and len(path.split('/')) >= 1:
+                    return True
+        
+        # PRIORITY 2: Check for job-specific URL patterns
+        job_url_patterns = [
+            # Direct job patterns
+            '/job/', '/jobs/', '/position/', '/positions/', '/vacancy/', '/vacancies/',
+            '/opportunity/', '/opportunities/', '/opening/', '/openings/',
+            '/role/', '/roles/', '/posting/', '/postings/', '/listing/', '/listings/',
+            # Vietnamese patterns
+            '/tuyen-dung/', '/viec-lam/', '/co-hoi/', '/nhan-vien/', '/ung-vien/',
+            '/cong-viec/', '/lam-viec/', '/thu-viec/', '/chinh-thuc/',
+            '/nghe-nghiep/', '/tim-viec/', '/dang-tuyen/', '/vi-tri/',
+            # Job-specific role patterns
+            '/developer/', '/engineer/', '/analyst/', '/manager/', '/specialist/',
+            '/consultant/', '/coordinator/', '/assistant/', '/director/', '/lead/',
+            '/senior/', '/junior/', '/intern/', '/trainee/', '/graduate/',
+            # Work type patterns
+            '/remote/', '/hybrid/', '/full-time/', '/part-time/', '/contract/',
+            '/freelance/', '/temporary/', '/permanent/',
+            # Application patterns
+            '/apply/', '/application/', '/candidate/', '/applicant/'
+        ]
+        
+        # Check for job URL patterns
+        for pattern in job_url_patterns:
+            if pattern in url_lower:
+                return True
+        
+        # PRIORITY 3: Check for query parameters indicating job search
+        if '?' in url:
+            job_params = [
+                'id=', 'job=', 'position=', 'vacancy=', 'role=', 'posting=',
+                'search=', 'q=', 'keyword=', 'title=', 'location='
+            ]
+            if any(param in url_lower for param in job_params):
+                return True
+        
+        # PRIORITY 4: Check for numeric IDs (common in job systems)
+        path = parsed_url.path.strip('/')
+        if path:
+            path_parts = path.split('/')
+            # Check if last part is numeric (common for job IDs)
+            if path_parts and path_parts[-1].isdigit():
+                return True
+        
+        # REJECT: Obvious non-job patterns
+        obvious_non_job_patterns = [
             # External services
             'google.com/maps', 'facebook.com', 'twitter.com', 'linkedin.com',
             'youtube.com', 'instagram.com', 'tiktok.com',
-            # Company pages
-            '/services/', '/service/', '/products/', '/product/',
-            '/solutions/', '/solution/', '/portfolio/', '/about/',
-            '/contact/', '/team/', '/company/', '/news/', '/blog/',
-            '/press/', '/media/', '/investor/',
-            # Vietnamese equivalents
-            '/dich-vu/', '/san-pham/', '/giai-phap/', '/gioi-thieu/',
-            '/lien-he/', '/doi-ngu/', '/cong-ty/', '/tin-tuc/',
-            '/bai-viet/', '/thong-cao/', '/truyen-thong/',
-            # Other common patterns
-            '/privacy/', '/terms/', '/cookie/', '/sitemap/',
-            '/search/', '/login/', '/register/', '/signup/',
-            '/admin/', '/dashboard/', '/account/', '/profile/',
             # File extensions
             '.jpg', '.jpeg', '.png', '.gif', '.svg', '.ico',
-            '.css', '.js', '.woff', '.woff2', '.ttf', '.eot'
+            '.css', '.js', '.woff', '.woff2', '.ttf', '.eot',
+            # Admin/System pages
+            '/admin/', '/dashboard/', '/login/', '/register/', '/signup/',
+            '/privacy/', '/terms/', '/cookie/', '/sitemap/',
+            # Company pages (not job-related)
+            '/about/', '/company/', '/team/', '/contact/', '/services/',
+            '/products/', '/solutions/', '/portfolio/', '/news/', '/blog/',
+            '/press/', '/media/', '/investor/', '/career/', '/careers/',
+            # Vietnamese equivalents
+            '/gioi-thieu/', '/cong-ty/', '/doi-ngu/', '/lien-he/',
+            '/dich-vu/', '/san-pham/', '/giai-phap/', '/tin-tuc/',
+            '/bai-viet/', '/thong-cao/', '/truyen-thong/'
         ]
         
-        # If URL contains any non-job pattern, reject it
-        for pattern in non_job_patterns:
+        # Reject if contains obvious non-job patterns
+        for pattern in obvious_non_job_patterns:
             if pattern in url_lower:
                 return False
         
-        # Check for job indicators (must be present)
-        job_indicators = [
-            # English patterns
-            '/career/', '/job/', '/position/', '/vacancy/',
-            '/opportunity/', '/opening/', '/apply/',
-            '/recruitment/', '/employment/', '/hiring/',
-            # Vietnamese patterns  
-            '/tuyen-dung/', '/viec-lam/', '/co-hoi/',
-            '/nhan-vien/', '/ung-vien/', '/cong-viec/',
-            '/lam-viec/', '/thu-viec/', '/chinh-thuc/',
-            '/nghe-nghiep/', '/tim-viec/', '/dang-tuyen/',
-            # Job-specific patterns
-            '/developer/', '/engineer/', '/analyst/', '/manager/',
-            '/specialist/', '/consultant/', '/coordinator/',
-            '/assistant/', '/director/', '/lead/', '/senior/',
-            '/junior/', '/intern/', '/trainee/', '/graduate/',
-            '/remote/', '/hybrid/', '/full-time/', '/part-time/',
-            '/contract/', '/freelance/', '/temporary/'
-        ]
-        
-        # Must have at least one job indicator
-        has_job_indicator = any(indicator in url_lower for indicator in job_indicators)
-        
-        if not has_job_indicator:
+        # REJECT: Generic career pages (not specific jobs)
+        if (url_lower.endswith('/career') or url_lower.endswith('/careers') or 
+            url_lower.endswith('/jobs') or url_lower.endswith('/') or
+            url_lower.rstrip('/').split('/')[-1] in ['career', 'careers', 'jobs']):
             return False
         
-        # Additional validation: URL should not be too generic
-        # Reject URLs that are just the career page itself
-        if url_lower.endswith('/career') or url_lower.endswith('/careers') or url_lower.endswith('/jobs'):
+        # REJECT: Too short URLs (likely not specific jobs)
+        if not path or len(path.split('/')) < 2:
             return False
         
-        # URL should have some specificity (not just /career/)
-        path_parts = url.split('/')
-        if len(path_parts) < 3:  # Too short, likely not a specific job (reduced from 4 to 3)
-            return False
-        
-        return True
+        # Default: reject if no clear job indicators
+        return False
 
     def extract_contact_info(self, response) -> Dict:
         """
