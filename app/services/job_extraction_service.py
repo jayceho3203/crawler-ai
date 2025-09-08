@@ -1115,6 +1115,13 @@ class JobExtractionService:
         
         try:
             logger.info(f"📄 Extracting job details from: {job_url}")
+            # Infer index from URL fragment if present
+            if job_index is None and '#job-' in job_url:
+                try:
+                    job_index = int(job_url.split('#job-')[-1])
+                    logger.info(f"   🎯 Inferred job index from URL: {job_index}")
+                except Exception:
+                    job_index = None
             if job_index:
                 logger.info(f"   🎯 Job index: {job_index}")
             
@@ -1123,6 +1130,10 @@ class JobExtractionService:
             logger.info(f"   🔍 Detected URL type: {url_type}")
             
             if url_type == 'career_page':
+                # Default to first job when index not provided
+                if job_index is None:
+                    job_index = 1
+                    logger.info("   🎯 No job_index provided -> default to 1 for career page")
                 # Handle career page - extract specific job by index
                 logger.info(f"   📄 Processing career page: {job_url}")
                 result = await self._extract_specific_job_from_career_page(job_url, job_index, start_time)
@@ -1162,8 +1173,10 @@ class JobExtractionService:
                     logger.info(f"   ✅ Found job {job_index}: {job_data.get('title', 'Unknown')}")
                     return self._format_job_response(job_data, career_url)
                 else:
-                    logger.warning(f"   ⚠️ Invalid job index {job_index}, available: 1-{len(direct_jobs)}")
-                    return self._empty_job_response(career_url, f'Invalid job index {job_index}')
+                    # Default gracefully to first job if index missing/invalid
+                    logger.warning(f"   ⚠️ Invalid job index {job_index}, default to 1 (available: 1-{len(direct_jobs)})")
+                    job_data = direct_jobs[0]
+                    return self._format_job_response(job_data, career_url)
             
             # If no cache, extract directly from career page
             logger.info(f"   📄 No cache found, extracting directly from career page")
