@@ -1036,7 +1036,7 @@ class JobExtractionService:
             ]
             
             job_keyword_count = sum(1 for keyword in job_keywords if keyword in content_lower)
-            if job_keyword_count < 2:
+            if job_keyword_count < 1:  # Reduced from 2 to 1
                 logger.info(f"   🤖 Heuristic: Rejected - Insufficient job keywords ({job_keyword_count})")
                 return False
             
@@ -1811,17 +1811,26 @@ class JobExtractionService:
                     r'Senior Sales.*?Full Time.*?Xem Thêm',
                     r'AI Engineer.*?Part Time.*?Xem Thêm'
                 ],
+                'codetot': [
+                    r'\[Remote-HN\]\s+([^-\n]+)',
+                    r'\[Remote\]\s+([^-\n]+)',
+                    r'Tuyển dụng.*?(\d{2}/\d{2}/\d{4}):\s*([^-\n]+)',
+                    r'(\d{2}/\d{2}/\d{4}):\s*([^-\n]+)',
+                    r'([A-Z][^-\n]*(?:Developer|Engineer|Manager|Analyst|Specialist|Marketing|Test|Freelancer|Assistant|Intern))'
+                ],
                 'general': [
                     r'([A-Z][a-zA-Z\s]+(?:Developer|Engineer|Manager|Analyst|Specialist)).*?(?:Apply|View|See|Learn)',
                     r'([A-Z][a-zA-Z\s]+(?:Developer|Engineer|Manager|Analyst|Specialist)).*?(?:Fulltime|Part-time|Contract)'
                 ]
             }
             
-            # Try Migitek patterns first
+            # Try site-specific patterns first
             if 'migitek' in career_page_url.lower():
                 jobs = self._extract_jobs_by_patterns(page_text, job_patterns['migitek'], career_page_url, 'migitek')
             elif 'co-well' in career_page_url.lower():
                 jobs = self._extract_jobs_by_patterns(page_text, job_patterns['cowell'], career_page_url, 'cowell')
+            elif 'codetot' in career_page_url.lower():
+                jobs = self._extract_jobs_by_patterns(page_text, job_patterns['codetot'], career_page_url, 'codetot')
             else:
                 # Try general patterns
                 jobs = self._extract_jobs_by_patterns(page_text, job_patterns['general'], career_page_url, 'general')
@@ -1888,6 +1897,7 @@ class JobExtractionService:
     
     def _extract_title_from_text(self, job_text: str, site_type: str) -> str:
         """Extract job title from text"""
+        import re
         try:
             if site_type == 'migitek':
                 # For Migitek, extract the first line that looks like a job title
@@ -1916,6 +1926,29 @@ class JobExtractionService:
                             return line.replace('Full Time', '').strip()
                         if 'Part Time' in line:
                             return line.replace('Part Time', '').strip()
+                        return line
+            
+            elif site_type == 'codetot':
+                # For codetot, extract title from patterns like [Remote] Job Title
+                lines = job_text.split('\n')
+                for line in lines:
+                    line = line.strip()
+                    # Remove [Remote] or [Remote-HN] prefix
+                    if line.startswith('[Remote'):
+                        # Extract text after the closing bracket
+                        if ']' in line:
+                            title = line.split(']', 1)[1].strip()
+                            return title
+                    # Handle date format: "Tuyển dụng - 27/09/2024: Job Title"
+                    elif 'Tuyển dụng' in line and ':' in line:
+                        title = line.split(':', 1)[1].strip()
+                        return title
+                    # Handle date format: "27/09/2024: Job Title"
+                    elif re.match(r'\d{2}/\d{2}/\d{4}:', line):
+                        title = line.split(':', 1)[1].strip()
+                        return title
+                    # General job title extraction
+                    elif any(job_word in line.lower() for job_word in ['developer', 'engineer', 'manager', 'analyst', 'specialist', 'marketing', 'test', 'freelancer', 'assistant', 'intern']):
                         return line
             
             # General fallback
