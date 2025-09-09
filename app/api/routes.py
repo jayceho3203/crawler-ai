@@ -561,7 +561,7 @@ class PromptTestRequest(BaseModel):
     job_name: Optional[str] = None
     job_type: Optional[str] = None
     job_role: Optional[str] = None
-    job_description: str = ""
+    job_description: Optional[str] = None
 
 @router.post("/test_prompt")
 async def test_prompt(request: PromptTestRequest):

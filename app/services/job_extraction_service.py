@@ -2174,8 +2174,8 @@ class JobExtractionService:
         except Exception:
             return "Unknown"
     
-    async def _extract_job_urls_from_career_page(self, career_page_url: str) -> List[str]:
-        """Extract job URLs directly from career page HTML"""
+    async def _detect_career_page_type(self, career_page_url: str) -> str:
+        """Detect if career page has individual job URLs or embedded jobs"""
         try:
             from bs4 import BeautifulSoup
             from urllib.parse import urljoin
@@ -2185,155 +2185,162 @@ class JobExtractionService:
             from .crawler import crawl_single_url
             result = await crawl_single_url(career_page_url)
             if not result['success']:
-                return []
+                return "unknown"
             
             html_content = result['html']
             soup = BeautifulSoup(html_content, 'html.parser')
             
-            job_urls = []
-            
-            # Method 0: Extract jobs directly from career page content (no separate URLs)
-            direct_jobs = await self._extract_direct_jobs_from_career_page(soup, career_page_url)
-            if direct_jobs:
-                logger.info(f"   📄 Found {len(direct_jobs)} direct jobs in career page content")
-                # Store direct jobs for later use with job_index
-                for i, job in enumerate(direct_jobs):
-                    job['job_index'] = i + 1
-                    job['job_url'] = career_page_url  # Use career page URL as job URL
-                self._direct_jobs_cache = direct_jobs
-                # For direct jobs, return empty list since they don't have individual URLs
-                # The jobs are embedded in the career page content
-                logger.info(f"   📄 Direct jobs found, no individual URLs needed")
-                return []
-            
-            # Method 1: Look for job links with EXPANDED patterns for better detection
+            # Look for individual job URLs first
             job_link_patterns = [
-                # Standard career patterns
                 r'/career/[^"]+', r'/careers/[^"]+', r'/jobs/[^"]+', 
                 r'/positions/[^"]+', r'/opportunities/[^"]+', r'/tuyen-dung/[^"]+',
                 r'/recruitment/[^"]+', r'/vacancies/[^"]+', r'/openings/[^"]+',
-                r'/job/[^"]+', r'/position/[^"]+', r'/vacancy/[^"]+', r'/opening/[^"]+',
-                
-                # Additional job patterns
-                r'/role/[^"]+', r'/title/[^"]+', r'/posting/[^"]+', r'/listing/[^"]+',
-                r'/employment/[^"]+', r'/hiring/[^"]+', r'/apply/[^"]+',
-                r'/search/[^"]+', r'/find/[^"]+', r'/browse/[^"]+', r'/view/[^"]+',
-                r'/detail/[^"]+', r'/description/[^"]+', r'/requirements/[^"]+',
-                
-                # Vietnamese patterns
-                r'/viec-lam/[^"]+', r'/co-hoi/[^"]+', r'/nhan-vien/[^"]+',
-                r'/ung-vien/[^"]+', r'/cong-viec/[^"]+', r'/lam-viec/[^"]+',
-                r'/thu-viec/[^"]+', r'/chinh-thuc/[^"]+', r'/nghe-nghiep/[^"]+',
-                r'/tim-viec/[^"]+', r'/dang-tuyen/[^"]+', r'/vi-tri/[^"]+',
-                r'/ung-tuyen/[^"]+', r'/ho-so/[^"]+', r'/phong-van/[^"]+',
-                
-                # Job-specific role patterns
-                r'/developer/[^"]+', r'/engineer/[^"]+', r'/analyst/[^"]+',
-                r'/manager/[^"]+', r'/specialist/[^"]+', r'/consultant/[^"]+',
-                r'/coordinator/[^"]+', r'/assistant/[^"]+', r'/director/[^"]+',
-                r'/lead/[^"]+', r'/senior/[^"]+', r'/junior/[^"]+',
-                r'/intern/[^"]+', r'/trainee/[^"]+', r'/graduate/[^"]+',
-                
-                # Work type patterns
-                r'/remote/[^"]+', r'/hybrid/[^"]+', r'/full-time/[^"]+',
-                r'/part-time/[^"]+', r'/contract/[^"]+', r'/freelance/[^"]+',
-                r'/temporary/[^"]+'
+                r'/apply/[^"]+', r'/employment/[^"]+', r'/hiring/[^"]+',
+                r'/developer/[^"]+', r'/engineer/[^"]+', r'/manager/[^"]+',
+                r'/analyst/[^"]+', r'/specialist/[^"]+', r'/consultant/[^"]+'
             ]
             
-            # Find all links
+            # Find all links that match job patterns
             all_links = soup.find_all('a', href=True)
+            individual_job_urls = []
             
             for link in all_links:
                 href = link.get('href', '')
-                
-                # Check if href matches job patterns
-                for pattern in job_link_patterns:
-                    if re.search(pattern, href, re.IGNORECASE):
-                        full_url = urljoin(career_page_url, href)
-                        
-                        # Use strict job URL validation
-                        if self._is_job_url(full_url) and full_url not in job_urls:
-                            job_urls.append(full_url)
-                            logger.info(f"   🔗 Found job URL: {full_url}")
-                
-                # Skip mailto links completely
-                if href.startswith('mailto:'):
+                if not href:
                     continue
+                    
+                full_url = urljoin(career_page_url, href)
                 
-                # Check if link text contains job-related keywords (more flexible)
-                link_text = link.get_text().strip().lower()
-                job_keywords = [
-                    # Job roles
-                    'developer', 'engineer', 'designer', 'manager', 'analyst', 'specialist',
-                    'coordinator', 'assistant', 'director', 'lead', 'head', 'chief',
-                    'architect', 'consultant', 'advisor', 'expert', 'professional',
-                    
-                    # Seniority levels
-                    'senior', 'junior', 'mid', 'entry', 'level', 'principal', 'staff',
-                    'associate', 'executive', 'vice', 'deputy',
-                    
-                    # Job types
-                    'full-time', 'part-time', 'contract', 'temporary', 'permanent',
-                    'remote', 'hybrid', 'onsite', 'freelance', 'internship',
-                    
-                    # Departments
-                    'software', 'frontend', 'backend', 'fullstack', 'mobile', 'web',
-                    'data', 'ai', 'ml', 'devops', 'qa', 'testing', 'product',
-                    'marketing', 'sales', 'hr', 'finance', 'legal', 'operations',
-                    
-                    # Technologies
-                    'python', 'java', 'javascript', 'react', 'vue', 'angular',
-                    'node', 'php', 'c#', 'dotnet', 'ruby', 'go', 'rust',
-                    'aws', 'azure', 'gcp', 'docker', 'kubernetes',
-                    
-                    # Vietnamese keywords
-                    'lập trình', 'phát triển', 'thiết kế', 'quản lý', 'phân tích',
-                    'chuyên viên', 'trưởng nhóm', 'giám đốc', 'thực tập', 'cộng tác viên',
-                    'tuyển dụng', 'việc làm', 'cơ hội', 'vị trí'
-                ]
-                if any(keyword in link_text for keyword in job_keywords):
-                    full_url = urljoin(career_page_url, href)
-                    
-                    # Use strict job URL validation
-                    if self._is_job_url(full_url) and full_url not in job_urls:
-                        job_urls.append(full_url)
-                        logger.info(f"   🔗 Found job URL by keyword: {full_url}")
+                # Check if URL matches job patterns
+                for pattern in job_link_patterns:
+                    if re.search(pattern, full_url, re.IGNORECASE):
+                        if self._is_job_url(full_url):
+                            individual_job_urls.append(full_url)
+                            break
             
-            # Method 2: Look for job cards/sections
-            job_card_patterns = [
-                r'job', r'career', r'position', r'vacancy', r'opening', r'opportunity',
-                r'listing', r'posting', r'role', r'employment', r'work', r'hire',
-                r'candidate', r'applicant', r'resume', r'cv', r'application'
-            ]
-            job_cards = soup.find_all(['div', 'article', 'section', 'li'], 
-                                     class_=re.compile('|'.join(job_card_patterns), re.IGNORECASE))
-            for card in job_cards:
-                link = card.find('a', href=True)
-                if link:
-                    href = link.get('href')
-                    full_url = urljoin(career_page_url, href)
-                    if (full_url not in job_urls and 
-                        full_url != career_page_url and
-                        not full_url.endswith('/career') and
-                        not full_url.endswith('/careers') and
-                        not full_url.endswith('/jobs') and
-                        not full_url.endswith('/positions')):
-                        job_urls.append(full_url)
-                        logger.info(f"   🔗 Found job URL from card: {full_url}")
+            # Remove duplicates and filter
+            individual_job_urls = list(set(individual_job_urls))
+            individual_job_urls = [url for url in individual_job_urls if self._is_job_url(url)]
             
-            # Method 3: Content-based job URL detection
-            if not job_urls:
-                logger.info(f"   🔍 No job URLs found with patterns, trying content analysis")
-                content_job_urls = self._detect_job_urls_by_content(soup, career_page_url)
-                job_urls.extend(content_job_urls)
-            
-            # Filter and validate job URLs
-            validated_job_urls = self._validate_job_urls(job_urls, career_page_url)
-            
-            return validated_job_urls
-            
+            if individual_job_urls:
+                logger.info(f"   🔗 Detected INDIVIDUAL URL type: {len(individual_job_urls)} job URLs found")
+                return "individual_urls"
+            else:
+                # Check for embedded jobs
+                direct_jobs = await self._extract_direct_jobs_from_career_page(soup, career_page_url)
+                if direct_jobs:
+                    logger.info(f"   📄 Detected EMBEDDED type: {len(direct_jobs)} embedded jobs found")
+                    return "embedded_jobs"
+                else:
+                    logger.info(f"   ❓ Detected UNKNOWN type: No jobs found")
+                    return "unknown"
+                    
         except Exception as e:
-            logger.error(f"❌ Error extracting job URLs from career page: {e}")
+            logger.error(f"   ❌ Error detecting career page type: {e}")
+            return "unknown"
+
+    async def _extract_job_urls_from_career_page(self, career_page_url: str) -> List[str]:
+        """Extract job URLs directly from career page HTML"""
+        try:
+            from bs4 import BeautifulSoup
+            from urllib.parse import urljoin
+            import re
+            
+            # Detect career page type first
+            page_type = await self._detect_career_page_type(career_page_url)
+            
+            if page_type == "embedded_jobs":
+                # For embedded jobs, extract and cache them, return empty list for URLs
+                from .crawler import crawl_single_url
+                result = await crawl_single_url(career_page_url)
+                if not result['success']:
+                    return []
+                
+                html_content = result['html']
+                soup = BeautifulSoup(html_content, 'html.parser')
+                
+                direct_jobs = await self._extract_direct_jobs_from_career_page(soup, career_page_url)
+                if direct_jobs:
+                    logger.info(f"   📄 Found {len(direct_jobs)} embedded jobs in career page content")
+                    # Store direct jobs for later use with job_index
+                    for i, job in enumerate(direct_jobs):
+                        job['job_index'] = i + 1
+                        job['job_url'] = career_page_url  # Use career page URL as job URL
+                    self._direct_jobs_cache = direct_jobs
+                    logger.info(f"   📄 Embedded jobs found, no individual URLs needed")
+                    return []
+            
+            elif page_type == "individual_urls":
+                # For individual URLs, extract them
+                from .crawler import crawl_single_url
+                result = await crawl_single_url(career_page_url)
+                if not result['success']:
+                    return []
+                
+                html_content = result['html']
+                soup = BeautifulSoup(html_content, 'html.parser')
+                
+                job_urls = []
+                
+                # Method 1: Look for job links with EXPANDED patterns for better detection
+                job_link_patterns = [
+                    # Standard career patterns
+                    r'/career/[^"]+', r'/careers/[^"]+', r'/jobs/[^"]+', 
+                    r'/positions/[^"]+', r'/opportunities/[^"]+', r'/tuyen-dung/[^"]+',
+                    r'/recruitment/[^"]+', r'/vacancies/[^"]+', r'/openings/[^"]+',
+                    r'/apply/[^"]+', r'/employment/[^"]+', r'/hiring/[^"]+',
+                    # Job-specific patterns
+                    r'/developer/[^"]+', r'/engineer/[^"]+', r'/manager/[^"]+',
+                    r'/analyst/[^"]+', r'/specialist/[^"]+', r'/consultant/[^"]+',
+                    r'/coordinator/[^"]+', r'/assistant/[^"]+', r'/director/[^"]+',
+                    r'/lead/[^"]+', r'/senior/[^"]+', r'/junior/[^"]+',
+                    r'/intern/[^"]+', r'/trainee/[^"]+', r'/graduate/[^"]+',
+                    # Technology patterns
+                    r'/java/[^"]+', r'/php/[^"]+', r'/python/[^"]+', r'/javascript/[^"]+',
+                    r'/react/[^"]+', r'/angular/[^"]+', r'/vue/[^"]+', r'/node/[^"]+',
+                    r'/spring/[^"]+', r'/laravel/[^"]+', r'/frontend/[^"]+', r'/backend/[^"]+',
+                    r'/fullstack/[^"]+', r'/full-stack/[^"]+', r'/mobile/[^"]+', r'/ios/[^"]+',
+                    r'/android/[^"]+', r'/flutter/[^"]+', r'/react-native/[^"]+',
+                    r'/devops/[^"]+', r'/cloud/[^"]+', r'/aws/[^"]+', r'/azure/[^"]+',
+                    r'/kubernetes/[^"]+', r'/docker/[^"]+', r'/jenkins/[^"]+',
+                    # Vietnamese patterns
+                    r'/tuyen-dung/[^"]+', r'/viec-lam/[^"]+', r'/co-hoi/[^"]+',
+                    r'/nhan-vien/[^"]+', r'/ung-vien/[^"]+', r'/cong-viec/[^"]+',
+                    r'/lam-viec/[^"]+', r'/thu-viec/[^"]+', r'/chinh-thuc/[^"]+',
+                    r'/nghe-nghiep/[^"]+', r'/tim-viec/[^"]+', r'/dang-tuyen/[^"]+',
+                    r'/vi-tri/[^"]+', r'/cong-viec/[^"]+', r'/tuyen-dung/[^"]+',
+                    r'/ung-tuyen/[^"]+', r'/ho-so/[^"]+', r'/phong-van/[^"]+'
+                ]
+                
+                # Find all links that match job patterns
+                all_links = soup.find_all('a', href=True)
+                
+                for link in all_links:
+                    href = link.get('href', '')
+                    if not href:
+                        continue
+                        
+                    full_url = urljoin(career_page_url, href)
+                    
+                    # Check if URL matches job patterns
+                    for pattern in job_link_patterns:
+                        if re.search(pattern, full_url, re.IGNORECASE):
+                            if self._is_job_url(full_url):
+                                job_urls.append(full_url)
+                                logger.info(f"   🔗 Found job URL: {full_url}")
+                                break
+                
+                # Remove duplicates
+                job_urls = list(set(job_urls))
+                logger.info(f"   🔗 Found {len(job_urls)} individual job URLs")
+                return job_urls
+            
+            else:  # unknown type
+                logger.warning(f"   ❓ Unknown career page type, trying both methods")
+                return []
+                
+        except Exception as e:
+            logger.error(f"   ❌ Error extracting job URLs: {e}")
             return []
     
     def _validate_job_urls(self, job_urls: List[str], career_page_url: str) -> List[str]:
