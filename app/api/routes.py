@@ -3,26 +3,18 @@
 API routes for the crawler application
 """
 
-import json
 import logging
 from datetime import datetime
-from typing import List, Dict
-from fastapi import APIRouter, HTTPException, Request
+from typing import List, Dict, Optional
+from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from ..models.schemas import (
-    CrawlRequest, CrawlResponse, BatchCrawlRequest, BatchCrawlResponse,
-    JobDetailRequest, JobDetailValidationRequest, ChildLinksRequest, AIExtractionRequest,
-    ContactInfoRequest, ContactInfoResponse, CareerPagesRequest, CareerPagesResponse,
-    BatchCareerPagesRequest, BatchCareerPagesResponse,
-    JobExtractionRequest, JobExtractionResponse, AdvancedJobFindingRequest, AdvancedJobFindingResponse
+    JobDetailValidationRequest, CareerPagesRequest, CareerPagesResponse,
+    BatchCareerPagesRequest, BatchCareerPagesResponse
 )
-from ..services.crawler import crawl_single_url
-from ..services.cache import clear_cache, get_cache_stats
-from ..utils.constants import CAREER_KEYWORDS_VI, CAREER_SELECTORS, JOB_BOARD_DOMAINS
-from ..utils.contact_extractor import process_extracted_crawl_results
-from ..services.job_extractor import extract_jobs_from_page
+from ..services.cache import clear_cache
 from ..services.contact_extractor_service import ContactExtractorService
 from ..services.career_pages_service import CareerPagesService
 from ..services.job_extraction_service import JobExtractionService
@@ -563,3 +555,379 @@ async def clear_cache():
     from ..services.cache import clear_cache
     cleared_count = clear_cache()
     return {"success": True, "cleared_items": cleared_count, "message": f"Cleared {cleared_count} cached items"}
+
+class PromptTestRequest(BaseModel):
+    job_link: str
+    job_name: Optional[str] = None
+    job_type: Optional[str] = None
+    job_role: Optional[str] = None
+    job_description: str = ""
+
+@router.post("/test_prompt")
+async def test_prompt(request: PromptTestRequest):
+    """
+    Test prompt validation and extraction without triggering full workflow
+    """
+    try:
+        logger.info(f"🧪 Testing prompt with job data...")
+        
+        # Simulate the prompt validation logic
+        job_data = {
+            'title': request.job_name or '',
+            'description': request.job_description or '',
+            'company': '',
+            'location': '',
+            'job_type': request.job_type or '',
+            'job_role': request.job_role or ''
+        }
+        
+        # Use the same validation logic as the service
+        from ..services.job_extraction_service import JobExtractionService
+        job_service = JobExtractionService()
+        
+        # Test AI validation
+        is_valid = await job_service._validate_job_with_ai(job_data, request.job_link)
+        
+        # Test prompt processing
+        prompt_result = {
+            "input": {
+                "job_link": request.job_link,
+                "job_name": request.job_name,
+                "job_type": request.job_type,
+                "job_role": request.job_role,
+                "job_description": request.job_description
+            },
+            "validation": {
+                "is_valid_job": is_valid,
+                "ai_validation_passed": is_valid
+            },
+            "extraction": {
+                "job_link": request.job_link,
+                "job_name": request.job_name or None,
+                "job_type": request.job_type or "Full-time",
+                "job_role": request.job_role or None,
+                "job_description": request.job_description or None,
+                "job_link_final": request.job_link
+            },
+            "prompt_analysis": {
+                "has_title": bool(request.job_name and len(request.job_name.strip()) > 3),
+                "has_description": bool(request.job_description and len(request.job_description.strip()) > 50),
+                "description_length": len(request.job_description or ""),
+                "title_length": len(request.job_name or ""),
+                "would_be_accepted": is_valid
+            }
+        }
+        
+        return {
+            "success": True,
+            "test_result": prompt_result,
+            "message": "Prompt test completed successfully"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in prompt test endpoint: {e}")
+        return {
+            "success": False,
+            "error_message": str(e),
+            "test_result": None
+        }
+
+class SimulateApifyRequest(BaseModel):
+    url: str
+    Title: Optional[str] = None
+    Phone: Optional[str] = None
+    Website: Optional[str] = None
+    Domain: Optional[str] = None
+
+@router.post("/simulate_apify_workflow")
+async def simulate_apify_workflow(request: SimulateApifyRequest):
+    """
+    Simulate the full Apify workflow without actually calling Apify (to save money)
+    This endpoint simulates the data that would come from Apify and runs through the full pipeline
+    """
+    try:
+        logger.info(f"🧪 Simulating Apify workflow for: {request.url}")
+        
+        # Step 1: Simulate career page detection
+        career_service = CareerPagesService()
+        career_result = await career_service.detect_career_pages(
+            url=request.url,
+            include_subdomain_search=True,
+            max_pages_to_scan=10,
+            strict_filtering=False,
+            include_job_boards=True,
+            use_scrapy=True
+        )
+        
+        # Step 2: Simulate job extraction if career pages found
+        job_results = []
+        if career_result.get('success') and career_result.get('career_pages'):
+            job_service = JobExtractionService()
+            
+            for career_page in career_result.get('career_pages', [])[:2]:  # Test first 2 career pages
+                # Extract job URLs
+                job_urls_result = await job_service.extract_job_urls_only(
+                    career_page_url=career_page,
+                    max_jobs=5,
+                    include_job_data=False
+                )
+                
+                # Extract job details for each job found
+                if job_urls_result.get('job_indices'):
+                    for job_index in job_urls_result.get('job_indices', [])[:3]:  # Test first 3 jobs
+                        job_details_result = await job_service.extract_job_details_only(
+                            job_url=career_page,
+                            job_index=job_index
+                        )
+                        
+                        if job_details_result.get('success') and job_details_result.get('job'):
+                            job = job_details_result['job']
+                            job_results.append({
+                                "career_page": career_page,
+                                "job_index": job_index,
+                                "job_data": {
+                                    "job_link": job.get('job_link', career_page),
+                                    "job_name": job.get('title', ''),
+                                    "job_type": job.get('job_type', 'Full-time'),
+                                    "job_role": job.get('job_role', ''),
+                                    "job_description": job.get('description', '')
+                                },
+                                "extraction_success": True
+                            })
+                        else:
+                            job_results.append({
+                                "career_page": career_page,
+                                "job_index": job_index,
+                                "job_data": None,
+                                "extraction_success": False,
+                                "error": job_details_result.get('error_message', 'Unknown error')
+                            })
+        
+        # Step 3: Simulate contact extraction
+        contact_service = ContactExtractorService()
+        contact_result = await contact_service.extract_contact_info(
+            url=request.url,
+            include_social=True,
+            include_emails=True,
+            include_phones=True,
+            max_depth=1
+        )
+        
+        # Step 4: Simulate N8N prompt processing
+        prompt_tests = []
+        for job_result in job_results:
+            if job_result.get('job_data'):
+                job_data = job_result['job_data']
+                
+                # Test the prompt validation
+                test_job_data = {
+                    'title': job_data.get('job_name', ''),
+                    'description': job_data.get('job_description', ''),
+                    'company': '',
+                    'location': '',
+                    'job_type': job_data.get('job_type', ''),
+                    'job_role': job_data.get('job_role', '')
+                }
+                
+                job_service = JobExtractionService()
+                is_valid = await job_service._validate_job_with_ai(test_job_data, job_data.get('job_link', ''))
+                
+                prompt_tests.append({
+                    "job_index": job_result['job_index'],
+                    "career_page": job_result['career_page'],
+                    "prompt_input": job_data,
+                    "ai_validation": {
+                        "passed": is_valid,
+                        "would_be_accepted": is_valid
+                    },
+                    "prompt_analysis": {
+                        "has_title": bool(job_data.get('job_name', '').strip()),
+                        "has_description": bool(job_data.get('job_description', '').strip()),
+                        "title_length": len(job_data.get('job_name', '')),
+                        "description_length": len(job_data.get('job_description', ''))
+                    }
+                })
+        
+        return {
+            "success": True,
+            "simulation_result": {
+                "input_url": request.url,
+                "apify_data": {
+                    "Title": request.Title,
+                    "Phone": request.Phone,
+                    "Website": request.Website,
+                    "Domain": request.Domain
+                },
+                "career_detection": {
+                    "success": career_result.get('success', False),
+                    "career_pages_found": len(career_result.get('career_pages', [])),
+                    "career_pages": career_result.get('career_pages', [])
+                },
+                "job_extraction": {
+                    "total_jobs_found": len(job_results),
+                    "successful_extractions": len([j for j in job_results if j.get('extraction_success')]),
+                    "job_results": job_results
+                },
+                "contact_extraction": {
+                    "emails": contact_result.get('emails', []),
+                    "phones": contact_result.get('phones', []),
+                    "social_links": contact_result.get('social_links', [])
+                },
+                "n8n_prompt_tests": prompt_tests,
+                "summary": {
+                    "total_career_pages": len(career_result.get('career_pages', [])),
+                    "total_jobs": len(job_results),
+                    "valid_jobs": len([j for j in job_results if j.get('extraction_success')]),
+                    "prompt_passed": len([p for p in prompt_tests if p.get('ai_validation', {}).get('passed')]),
+                    "prompt_failed": len([p for p in prompt_tests if not p.get('ai_validation', {}).get('passed')])
+                }
+            },
+            "message": "Apify workflow simulation completed successfully"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in Apify workflow simulation: {e}")
+        return {
+            "success": False,
+            "error_message": str(e),
+            "simulation_result": None
+        }
+
+@router.post("/test_n8n_prompt")
+async def test_n8n_prompt(request: SimulateApifyRequest):
+    """
+    Test N8N prompt with real job data from a website (without calling Apify)
+    This simulates the exact data flow that would happen in N8N
+    """
+    try:
+        logger.info(f"🧪 Testing N8N prompt for: {request.url}")
+        
+        # Step 1: Get career pages
+        career_service = CareerPagesService()
+        career_result = await career_service.detect_career_pages(
+            url=request.url,
+            include_subdomain_search=True,
+            max_pages_to_scan=5,
+            strict_filtering=False,
+            include_job_boards=True,
+            use_scrapy=True
+        )
+        
+        # Step 2: Get jobs from career pages
+        all_jobs = []
+        if career_result.get('success') and career_result.get('career_pages'):
+            job_service = JobExtractionService()
+            
+            for career_page in career_result.get('career_pages', [])[:1]:  # Test first career page only
+                # Get job URLs
+                job_urls_result = await job_service.extract_job_urls_only(
+                    career_page_url=career_page,
+                    max_jobs=3,
+                    include_job_data=False
+                )
+                
+                # Get job details
+                if job_urls_result.get('job_indices'):
+                    for job_index in job_urls_result.get('job_indices', [])[:2]:  # Test first 2 jobs
+                        job_details_result = await job_service.extract_job_details_only(
+                            job_url=career_page,
+                            job_index=job_index
+                        )
+                        
+                        if job_details_result.get('success') and job_details_result.get('job'):
+                            job = job_details_result['job']
+                            all_jobs.append({
+                                "job_link": job.get('job_link', career_page),
+                                "job_name": job.get('title', ''),
+                                "job_type": job.get('job_type', 'Full-time'),
+                                "job_role": job.get('job_role', ''),
+                                "job_description": job.get('description', '')
+                            })
+        
+        # Step 3: Test each job with N8N prompt logic
+        prompt_results = []
+        for i, job in enumerate(all_jobs):
+            # This simulates the exact data that would go to N8N prompt
+            n8n_input = {
+                "job_link": job.get('job_link', ''),
+                "job_name": job.get('job_name', ''),
+                "job_type": job.get('job_type', ''),
+                "job_role": job.get('job_role', ''),
+                "job_description": job.get('job_description', '')
+            }
+            
+            # Test AI validation (same as N8N would do)
+            test_job_data = {
+                'title': n8n_input.get('job_name', ''),
+                'description': n8n_input.get('job_description', ''),
+                'company': '',
+                'location': '',
+                'job_type': n8n_input.get('job_type', ''),
+                'job_role': n8n_input.get('job_role', '')
+            }
+            
+            job_service = JobExtractionService()
+            is_valid = await job_service._validate_job_with_ai(test_job_data, n8n_input.get('job_link', ''))
+            
+            # Simulate N8N prompt output
+            if is_valid:
+                n8n_output = {
+                    "job_link": n8n_input.get('job_link'),
+                    "job_name": n8n_input.get('job_name'),
+                    "job_type": n8n_input.get('job_type') or "Full-time",
+                    "job_role": n8n_input.get('job_role'),
+                    "job_description": n8n_input.get('job_description')
+                }
+            else:
+                n8n_output = {
+                    "job_link": n8n_input.get('job_link'),
+                    "job_name": None,
+                    "job_type": None,
+                    "job_role": None,
+                    "job_description": None
+                }
+            
+            prompt_results.append({
+                "job_index": i + 1,
+                "n8n_input": n8n_input,
+                "ai_validation_passed": is_valid,
+                "n8n_output": n8n_output,
+                "analysis": {
+                    "has_title": bool(n8n_input.get('job_name', '').strip()),
+                    "has_description": bool(n8n_input.get('job_description', '').strip()),
+                    "title_length": len(n8n_input.get('job_name', '')),
+                    "description_length": len(n8n_input.get('job_description', ''))
+                }
+            })
+        
+        return {
+            "success": True,
+            "test_result": {
+                "input_url": request.url,
+                "apify_simulation": {
+                    "Title": request.Title,
+                    "Phone": request.Phone,
+                    "Website": request.Website,
+                    "Domain": request.Domain
+                },
+                "career_pages_found": len(career_result.get('career_pages', [])),
+                "career_pages": career_result.get('career_pages', []),
+                "jobs_extracted": len(all_jobs),
+                "n8n_prompt_tests": prompt_results,
+                "summary": {
+                    "total_jobs": len(all_jobs),
+                    "prompt_passed": len([p for p in prompt_results if p.get('ai_validation_passed')]),
+                    "prompt_failed": len([p for p in prompt_results if not p.get('ai_validation_passed')]),
+                    "success_rate": f"{(len([p for p in prompt_results if p.get('ai_validation_passed')]) / max(len(prompt_results), 1)) * 100:.1f}%"
+                }
+            },
+            "message": "N8N prompt test completed successfully"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in N8N prompt test: {e}")
+        return {
+            "success": False,
+            "error_message": str(e),
+            "test_result": None
+        }
