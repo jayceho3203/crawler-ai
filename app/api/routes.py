@@ -556,6 +556,12 @@ async def clear_cache():
     cleared_count = clear_cache()
     return {"success": True, "cleared_items": cleared_count, "message": f"Cleared {cleared_count} cached items"}
 
+@router.post("/clear-job-cache")
+async def clear_job_cache():
+    """Clear all job extraction cache"""
+    job_extraction_service.clear_all_cache()
+    return {"success": True, "message": "Cleared all job extraction cache"}
+
 class PromptTestRequest(BaseModel):
     job_link: str
     job_name: Optional[str] = None

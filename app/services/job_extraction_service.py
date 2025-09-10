@@ -40,6 +40,14 @@ class JobExtractionService:
             JobExtractionService._global_direct_jobs_cache = []
         if not hasattr(JobExtractionService, '_global_career_page_cache'):
             JobExtractionService._global_career_page_cache = None
+    
+    def clear_all_cache(self):
+        """Clear all cache levels"""
+        self._direct_jobs_cache = []
+        self._career_page_cache = None
+        JobExtractionService._global_direct_jobs_cache = []
+        JobExtractionService._global_career_page_cache = None
+        logger.info("   🗑️ Cleared all cache levels")
         
         # Log which extractor is being used
         if USE_PLAYWRIGHT:
@@ -365,157 +373,72 @@ class JobExtractionService:
             return False
     
     def _is_job_url(self, url: str) -> bool:
-        """Check if URL is a job detail page with OPTIMIZED filtering for better job detection"""
+        """Check if URL is a job detail page - SIMPLIFIED VERSION"""
         url_lower = url.lower()
         
-        # Skip URLs that are likely to be 404 or invalid
-        skip_patterns = [
-            'javascript:', 'mailto:', 'tel:', '#', 
-            'void(0)', 'undefined', 'null'
-        ]
-        
-        # Skip mailto links - they are application links, not job URLs
-        if url_lower.startswith('mailto:'):
-            return False
-        
-        for pattern in skip_patterns:
-            if pattern in url_lower:
-                return False
-        
-        # Skip sitemap and other non-job files
-        skip_files = ['sitemap.xml', 'robots.txt', '.xml', '.json', '.pdf', '.doc', '.docx']
-        if any(file_ext in url_lower for file_ext in skip_files):
+        # Skip invalid URLs
+        if not url or url_lower.startswith(('javascript:', 'mailto:', 'tel:', '#')):
             return False
         
         # Must be a valid HTTP URL
         if not self._is_http_url(url):
             return False
         
-        # PRIORITY 1: Check for career subdomains (HIGHEST PRIORITY)
-        parsed_url = urlparse(url)
-        domain = parsed_url.netloc.lower()
-        
-        # Career subdomains are almost always job-related
-        career_subdomains = [
-            'career.', 'careers.', 'jobs.', 'job.', 'work.', 'employment.',
-            'recruitment.', 'hiring.', 'talent.', 'opportunities.',
-            'tuyen-dung.', 'viec-lam.', 'co-hoi.'
-        ]
-        
-        for subdomain in career_subdomains:
-            if domain.startswith(subdomain):
-                # Additional validation for career subdomains
-                path = parsed_url.path.strip('/')
-                # Accept if it has some path content (not just root)
-                if path and len(path.split('/')) >= 1:
-                    return True
-        
-        # NEGATIVE INDICATORS: Reject non-job URLs first
-        non_job_patterns = [
-            '/talent-community', '/work-at-', '/work-culture', '/benefits',
-            '/about', '/contact', '/privacy', '/terms', '/cookie',
-            '/news', '/blog', '/press', '/media', '/investor',
-            '/sustainability', '/diversity', '/culture', '/values',
-            '/leadership', '/team', '/office', '/location',
-            '/university', '/training', '/development', '/program',
-            '/event', '/webinar', '/conference', '/award',
-            '/partnership', '/client', '/customer', '/service',
-            '/product', '/solution', '/technology', '/innovation',
-            '/research', '/case-study', '/whitepaper', '/report'
-        ]
-        
-        path_lower = parsed_url.path.lower()
-        for pattern in non_job_patterns:
-            if pattern in path_lower:
-                return False
-        
-        # POSITIVE INDICATORS: Check for job-related patterns (more strict)
-        job_indicators = [
-            # English patterns
-            '/job/', '/position/', '/vacancy/',
-            '/opportunity/', '/opening/', '/apply/',
-            '/recruitment/', '/employment/', '/hiring/',
-            # Vietnamese patterns  
-            '/tuyen-dung/', '/viec-lam/', '/co-hoi/',
-            '/nhan-vien/', '/ung-vien/', '/cong-viec/',
-            '/lam-viec/', '/thu-viec/', '/chinh-thuc/',
-            '/nghe-nghiep/', '/tim-viec/', '/dang-tuyen/',
-            # Job-specific patterns
-            '/developer/', '/engineer/', '/analyst/', '/manager/',
-            '/specialist/', '/consultant/', '/coordinator/',
-            '/assistant/', '/director/', '/lead/', '/senior/',
-            '/junior/', '/intern/', '/trainee/', '/graduate/',
-            '/remote/', '/hybrid/', '/full-time/', '/part-time/',
-            '/contract/', '/freelance/', '/temporary/',
-            # Additional job patterns
-            '/role/', '/title/', '/posting/', '/listing/',
-            '/search/', '/find/', '/browse/', '/view/',
-            '/detail/', '/description/', '/requirements/',
-            # Vietnamese job patterns
-            '/vi-tri/', '/cong-viec/', '/tuyen-dung/',
-            '/ung-tuyen/', '/ho-so/', '/phong-van/',
-            # Technology patterns (common in job URLs)
-            '/java/', '/php/', '/python/', '/javascript/', '/react/',
-            '/angular/', '/vue/', '/node/', '/spring/', '/laravel/',
-            '/frontend/', '/backend/', '/fullstack/', '/full-stack/',
-            '/mobile/', '/ios/', '/android/', '/flutter/', '/react-native/',
-            '/devops/', '/cloud/', '/aws/', '/azure/', '/kubernetes/',
-            '/data/', '/analytics/', '/machine-learning/', '/ai/',
-            '/blockchain/', '/crypto/', '/fintech/', '/ecommerce/',
-            '/marketing/', '/sales/', '/hr/', '/finance/', '/accounting/',
-            '/design/', '/ui/', '/ux/', '/product/', '/project/',
-            '/qa/', '/testing/', '/quality/', '/security/', '/cyber/',
-            '/support/', '/customer/', '/technical/', '/business/',
-            '/operations/', '/logistics/', '/supply/', '/procurement/'
-        ]
-        
-        # Check for job indicators (preferred but not mandatory)
-        has_job_indicator = any(indicator in url_lower for indicator in job_indicators)
-        
-        # Reject URLs that are just the career page itself or root URLs
-        if (url_lower.endswith('/career') or url_lower.endswith('/careers') or 
-            url_lower.endswith('/jobs') or url_lower.endswith('/') or
-            url_lower.rstrip('/').split('/')[-1] in ['career', 'careers', 'jobs']):
+        # Skip files that are clearly not job pages
+        skip_files = ['.xml', '.json', '.pdf', '.doc', '.docx', 'sitemap.xml', 'robots.txt']
+        if any(file_ext in url_lower for file_ext in skip_files):
             return False
         
-        # URL should have some specificity (more strict)
-        path_parts = url.split('/')
-        if len(path_parts) < 3:  # Too short, likely not a specific job
+        # Basic job URL patterns
+        job_patterns = [
+            '/job/', '/jobs/', '/career/', '/careers/', '/position/', '/vacancy/',
+            '/opportunity/', '/opening/', '/apply/', '/recruitment/', '/employment/',
+            '/hiring/', '/tuyen-dung/', '/viec-lam/', '/co-hoi/', '/nhan-vien/',
+            '/ung-vien/', '/cong-viec/', '/lam-viec/', '/thu-viec/', '/chinh-thuc/',
+            '/nghe-nghiep/', '/tim-viec/', '/dang-tuyen/', '/vi-tri/', '/ung-tuyen/',
+            '/ho-so/', '/phong-van/', '/developer/', '/engineer/', '/analyst/',
+            '/manager/', '/specialist/', '/consultant/', '/coordinator/', '/assistant/',
+            '/director/', '/lead/', '/senior/', '/junior/', '/intern/', '/trainee/',
+            '/graduate/', '/remote/', '/hybrid/', '/full-time/', '/part-time/',
+            '/contract/', '/freelance/', '/temporary/', '/role/', '/title/',
+            '/posting/', '/listing/', '/search/', '/find/', '/browse/', '/view/',
+            '/detail/', '/description/', '/requirements/'
+        ]
+        
+        # Check if URL contains job patterns
+        has_job_pattern = any(pattern in url_lower for pattern in job_patterns)
+        
+        # Reject URLs that are just career page roots
+        if (url_lower.rstrip('/').endswith('/career') or 
+            url_lower.rstrip('/').endswith('/careers') or 
+            url_lower.rstrip('/').endswith('/jobs')):
             return False
         
-        # If URL has job indicators, it's likely a job URL
-        if has_job_indicator:
-            return True
-        
-        # For URLs without obvious job indicators, use additional heuristics
-        # Check if URL has numeric ID or specific path structure
-        url_path = url.split('/')[-1] if '/' in url else url
-        
-        # Accept URLs with numeric IDs (common for job postings)
-        if url_path.isdigit():
-            return True
-        
-        # Accept URLs with common job-related file extensions or patterns
-        job_file_patterns = ['.html', '.php', '.asp', '.aspx', '.jsp']
-        if any(pattern in url_lower for pattern in job_file_patterns):
-            return True
-        
-        # Accept URLs with query parameters (common for job search results)
-        if '?' in url and any(param in url_lower for param in ['id=', 'job=', 'position=', 'vacancy=']):
-            return True
-        
-        # Additional validation: Check if URL is too generic
-        # Reject URLs that are just the root domain
+        # URL should have some path content (not just domain)
+        from urllib.parse import urlparse
         parsed_url = urlparse(url)
         path = parsed_url.path.strip('/')
         
-        # If path is empty or just one segment, it's likely not a specific job
-        if not path or len(path.split('/')) < 2:
+        if not path or len(path.split('/')) < 1:
             return False
         
-        # More lenient: accept any URL that's not obviously non-job
-        # This helps catch job URLs that don't follow standard patterns
-        return True
+        # If it has job patterns, it's likely a job URL
+        if has_job_pattern:
+            return True
+        
+        # For URLs without obvious patterns, check if it's not obviously non-job
+        non_job_patterns = [
+            '/about', '/contact', '/privacy', '/terms', '/cookie', '/news', '/blog',
+            '/press', '/media', '/investor', '/sustainability', '/diversity', '/culture',
+            '/values', '/leadership', '/team', '/office', '/location', '/university',
+            '/training', '/development', '/program', '/event', '/webinar', '/conference',
+            '/award', '/partnership', '/client', '/customer', '/service', '/product',
+            '/solution', '/technology', '/innovation', '/research', '/case-study',
+            '/whitepaper', '/report'
+        ]
+        
+        # If it doesn't have non-job patterns, accept it
+        return not any(pattern in url_lower for pattern in non_job_patterns)
     
     def _is_pagination_url(self, url: str) -> bool:
         """Check if URL is a pagination page"""
@@ -949,12 +872,20 @@ class JobExtractionService:
         title = job_data.get('title', '').strip()
         description = job_data.get('description', '').strip()
         
+        # Debug logging
+        logger.info(f"🔍 _format_job_response debug:")
+        logger.info(f"   📄 Input job_data: {job_data}")
+        logger.info(f"   📄 Title: '{title}' (len: {len(title)})")
+        logger.info(f"   📄 Description: '{description[:100]}...' (len: {len(description)})")
+        logger.info(f"   📄 Success: {success}")
+        
         # If job data is empty, mark as failed
         if not title or not description or len(description) < 10:
             success = False
             error_message = 'Job data is empty or invalid'
+            logger.warning(f"   ⚠️ Job data validation failed: title={bool(title)}, desc_len={len(description)}")
         
-        return {
+        response = {
             'success': success,
             'job_url': job_url,
             'job': job_data,  # Include raw job data for AI validation
@@ -969,6 +900,9 @@ class JobExtractionService:
             'crawl_method': 'direct_cache' if success else 'failed',
             'error_message': error_message
         }
+        
+        logger.info(f"   📄 Final response job_details: {response['job_details']}")
+        return response
 
     def _empty_job_response(self, job_url: str, error_message: str = 'Job not found') -> Dict:
         """Return empty job response"""
@@ -1008,41 +942,60 @@ class JobExtractionService:
                 logger.info(f"   🤖 Heuristic: Rejected - Description too short")
                 return False
             
-            # Check for obvious non-job indicators
-            non_job_indicators = [
+            # Enhanced validation with multiple keyword categories
+            content_lower = f"{title} {description}".lower()
+            
+            # 1. CRITICAL REJECTION - Definitely not a job
+            critical_reject = [
                 '404', 'not found', 'page not found', 'error',
                 'privacy policy', 'terms of service', 'cookie policy',
-                'about us', 'contact us', 'home', 'main page',
                 'login', 'register', 'sign up', 'sign in'
             ]
             
-            content_lower = f"{title} {description}".lower()
-            for indicator in non_job_indicators:
+            for indicator in critical_reject:
                 if indicator in content_lower:
-                    logger.info(f"   🤖 Heuristic: Rejected - Contains non-job indicator: {indicator}")
+                    logger.info(f"   🤖 Heuristic: CRITICAL REJECT - Contains non-job indicator: {indicator}")
                     return False
             
-            # Check for job-specific keywords (English + Vietnamese)
-            job_keywords = [
-                'responsibilities', 'requirements', 'qualifications', 'experience',
-                'skills', 'apply', 'application', 'position', 'role', 'vacancy',
-                'employment', 'hiring', 'recruitment', 'candidate', 'applicant',
-                'salary', 'benefits', 'full-time', 'part-time', 'remote', 'hybrid',
-                # Vietnamese keywords
-                'tuyển dụng', 'việc làm', 'ứng tuyển', 'hạn ứng tuyển', 'mức lương',
-                'nơi làm việc', 'địa điểm', 'toàn thời gian', 'bán thời gian',
-                'kinh nghiệm', 'kỹ năng', 'yêu cầu', 'trách nhiệm', 'developer',
-                'engineer', 'manager', 'analyst', 'specialist', 'fulltime'
+            # 2. WARNING INDICATORS - Might not be a job, but check other factors
+            warning_indicators = [
+                'about us', 'main page', 'home page', 'welcome',
+                'company overview', 'our story', 'team'
             ]
             
-            job_keyword_count = sum(1 for keyword in job_keywords if keyword in content_lower)
-            if job_keyword_count < 1:  # Reduced from 2 to 1
-                logger.info(f"   🤖 Heuristic: Rejected - Insufficient job keywords ({job_keyword_count})")
-                return False
+            warning_count = 0
+            for indicator in warning_indicators:
+                if indicator in content_lower:
+                    warning_count += 1
+                    logger.info(f"   🤖 Heuristic: WARNING - Contains warning indicator: {indicator}")
             
-            # If heuristic checks pass, accept the job (skip AI service call for now)
-            logger.info(f"   🤖 Heuristic: Passed - Accepting job (AI service disabled)")
-            return True
+            # 3. POSITIVE JOB INDICATORS - Strong signals this is a job
+            positive_job_indicators = [
+                'responsibilities', 'requirements', 'qualifications', 'skills',
+                'experience', 'salary', 'benefits', 'apply', 'application',
+                'full-time', 'part-time', 'contract', 'remote', 'hybrid',
+                'developer', 'engineer', 'manager', 'analyst', 'designer',
+                'job description', 'position', 'role', 'vacancy', 'opening'
+            ]
+            
+            positive_count = 0
+            for indicator in positive_job_indicators:
+                if indicator in content_lower:
+                    positive_count += 1
+            
+            # 4. DECISION LOGIC
+            if warning_count > 2 and positive_count < 2:
+                logger.info(f"   🤖 Heuristic: REJECTED - Too many warnings ({warning_count}) and too few positive indicators ({positive_count})")
+                return False
+            elif positive_count >= 3:
+                logger.info(f"   🤖 Heuristic: ACCEPTED - Strong positive indicators ({positive_count})")
+                return True
+            elif positive_count >= 1 and warning_count <= 1:
+                logger.info(f"   🤖 Heuristic: ACCEPTED - Some positive indicators ({positive_count}) and few warnings ({warning_count})")
+                return True
+            else:
+                logger.info(f"   🤖 Heuristic: ACCEPTED - Default acceptance (positives: {positive_count}, warnings: {warning_count})")
+                return True
             
         except Exception as e:
             logger.error(f"   🤖 AI Validation Error: {e}")
@@ -1248,6 +1201,9 @@ class JobExtractionService:
                     'job_type': job_details.get('job_type', 'Full-time'),
                     'description': job_details.get('job_description', '')
                 }
+                logger.info(f"🔍 _extract_individual_job_details debug:")
+                logger.info(f"   📄 job_details from HTML: {job_details}")
+                logger.info(f"   📄 job_data for response: {job_data}")
                 return self._format_job_response(job_data, job_url)
             else:
                 return self._empty_job_response(job_url, 'No job details found on page')
@@ -1291,159 +1247,109 @@ class JobExtractionService:
         return False
     
     def _extract_job_details_from_html(self, result: Dict, job_url: str) -> Dict:
-        """Extract job details from HTML content"""
+        """Extract job details from HTML content - Universal approach"""
         try:
             from bs4 import BeautifulSoup
-            from urllib.parse import urlparse
+            import re
             
             html_content = result.get('html', '')
+            if not html_content:
+                logger.warning("   ⚠️ No HTML content to extract from")
+                return {}
+                
             soup = BeautifulSoup(html_content, 'html.parser')
             
             job_details = {
-                'job_name': '',        # Job Name (thay vì title)
-                'job_type': 'Full-time', # Job Type
-                'job_role': '',        # Job Role
-                'job_description': '', # Job Description (thay vì description)
-                'job_link': job_url    # Job Link (thay vì url)
+                'job_name': '',
+                'job_type': 'Full-time',
+                'job_role': '',
+                'job_description': '',
+                'job_link': job_url
             }
             
-            # Enhanced title extraction for Cole.vn and similar sites
-            title_selectors = [
-                'h1', 'h2', 'h3', '.job-title', '.position-title', '.title',
-                '.career-title', '.vacancy-title', '.opening-title',
-                '[data-job-title]', '[data-position-title]',
-                '.entry-title', '.post-title', '.page-title',
-                'h1.entry-title', 'h1.post-title', 'h1.page-title'
-            ]
-            for selector in title_selectors:
-                title_element = soup.select_one(selector)
-                if title_element:
-                    title_text = title_element.get_text().strip()
-                    if title_text and len(title_text) > 3:
+            # UNIVERSAL TITLE EXTRACTION - Simple and robust
+            logger.info("   🔄 Extracting title with universal approach")
+            
+            # Try h1 first (most common for job titles)
+            h1_elements = soup.find_all('h1')
+            for h1 in h1_elements:
+                title_text = h1.get_text().strip()
+                if title_text and len(title_text) > 3:
+                    # Filter out generic titles
+                    if not any(generic in title_text.lower() for generic in 
+                             ['home', 'about', 'contact', 'career', 'careers', 'welcome', 'blog', 'news']):
                         job_details['job_name'] = title_text
-                        job_details['job_role'] = title_text  # Set job_role same as job_name
-                        logger.info(f"   📄 Found job title: {title_text}")
+                        job_details['job_role'] = title_text
+                        logger.info(f"   📄 Found job title in h1: {title_text}")
                         break
             
-            # Enhanced description extraction for Cole.vn and similar sites
-            desc_selectors = [
-                '.job-description', '.description', '.content', '.job-content',
-                '.position-description', '.career-description', '.vacancy-description',
-                'article', '.main-content', '.job-details', '.position-details',
-                '.entry-content', '.post-content', '.page-content',
-                '.job-body', '.position-body', '.career-body',
-                '.job-info', '.position-info', '.career-info',
-                # CO-WELL specific selectors
-                '.job-detail', '.position-detail', '.career-detail',
-                '.job-requirements', '.position-requirements', '.career-requirements',
-                '.job-benefits', '.position-benefits', '.career-benefits',
-                '.job-responsibilities', '.position-responsibilities', '.career-responsibilities',
-                # Generic content selectors
-                '.content-area', '.main', '#main', '.container', '.wrapper',
-                # ICTS specific selectors
-                '.career-content', '.job-content', '.position-content',
-                '.career-detail', '.job-detail', '.position-detail',
-                '.career-info', '.job-info', '.position-info',
-                '.career-body', '.job-body', '.position-body',
-                '.career-section', '.job-section', '.position-section',
-                '.career-article', '.job-article', '.position-article',
-                '.career-text', '.job-text', '.position-text',
-                '.career-main', '.job-main', '.position-main',
-                '.career-wrapper', '.job-wrapper', '.position-wrapper',
-                '.text-content', '.body-content', '.page-body'
-            ]
-            for selector in desc_selectors:
-                desc_element = soup.select_one(selector)
-                if desc_element:
-                    desc_text = desc_element.get_text().strip()
-                    if desc_text and len(desc_text) > 50:
-                        job_details['job_description'] = desc_text[:2000]
-                        logger.info(f"   📄 Found job description with selector '{selector}' (length: {len(desc_text)})")
+            # If no h1, try h2
+            if not job_details['job_name']:
+                h2_elements = soup.find_all('h2')
+                for h2 in h2_elements:
+                    title_text = h2.get_text().strip()
+                    if title_text and len(title_text) > 3:
+                        if not any(generic in title_text.lower() for generic in 
+                                 ['home', 'about', 'contact', 'career', 'careers', 'welcome', 'blog', 'news']):
+                            job_details['job_name'] = title_text
+                            job_details['job_role'] = title_text
+                            logger.info(f"   📄 Found job title in h2: {title_text}")
                         break
-                    else:
-                        logger.info(f"   🔍 Found element with selector '{selector}' but text too short: {len(desc_text)} chars")
+            
+            # UNIVERSAL DESCRIPTION EXTRACTION - Get ALL content
+            logger.info("   🔄 Extracting description with universal approach")
+            
+            # Remove unwanted elements
+            for element in soup(['script', 'style', 'nav', 'header', 'footer', 'aside', 'noscript']):
+                element.decompose()
+            
+            # Get all text content
+            all_text = soup.get_text()
+            if all_text:
+                # Clean up text
+                all_text = re.sub(r'\s+', ' ', all_text).strip()
+                
+                # Filter out very short content
+                if len(all_text) > 50:
+                    job_details['job_description'] = all_text[:5000]  # Limit for Agent to summarize
+                    logger.info(f"   📄 Found description via universal extraction (length: {len(all_text)})")
                 else:
-                    logger.debug(f"   🔍 Selector '{selector}' not found")
+                    logger.warning(f"   ⚠️ Content too short: {len(all_text)} chars")
             
-            # Company info is already in Wehappi company details, so we skip it here
+            # Extract job type from content
+            if job_details['job_description']:
+                content_lower = job_details['job_description'].lower()
+                
+                if any(term in content_lower for term in ['full-time', 'full time', 'fulltime']):
+                    job_details['job_type'] = 'Full-time'
+                elif any(term in content_lower for term in ['part-time', 'part time', 'parttime']):
+                    job_details['job_type'] = 'Part-time'
+                elif any(term in content_lower for term in ['contract', 'contractor']):
+                    job_details['job_type'] = 'Contract'
+                elif any(term in content_lower for term in ['intern', 'internship']):
+                    job_details['job_type'] = 'Internship'
+                elif any(term in content_lower for term in ['remote']):
+                    job_details['job_type'] = 'Remote'
+                elif any(term in content_lower for term in ['hybrid']):
+                    job_details['job_type'] = 'Hybrid'
             
-            # Set job_role same as job_name for Wehappi
-            if job_details['job_name']:
-                job_details['job_role'] = job_details['job_name']
             
-            # Fallback: If no description found, try to extract from main content
-            if not job_details['job_description']:
-                logger.info("   🔄 No description found with selectors, trying fallback extraction")
-                
-                # Remove script, style, nav, header, footer elements
-                for element in soup(['script', 'style', 'nav', 'header', 'footer', 'aside']):
-                    element.decompose()
-                
-                # Try to find main content area
-                main_content = soup.find('main') or soup.find('article') or soup.find('div', class_=re.compile(r'main|content|body'))
-                
-                if main_content:
-                    desc_text = main_content.get_text().strip()
-                    if desc_text and len(desc_text) > 100:
-                        # Clean up text - add spaces between words that are concatenated
-                        # Add spaces between camelCase and PascalCase
-                        desc_text = re.sub(r'([a-z])([A-Z])', r'\1 \2', desc_text)
-                        # Add spaces between words and numbers
-                        desc_text = re.sub(r'([a-zA-Z])(\d)', r'\1 \2', desc_text)
-                        desc_text = re.sub(r'(\d)([a-zA-Z])', r'\1 \2', desc_text)
-                        # Clean up multiple spaces
-                        desc_text = re.sub(r'\s+', ' ', desc_text)
-                        
-                        job_details['job_description'] = desc_text[:2000]
-                        logger.info(f"   📄 Found description via fallback (length: {len(desc_text)})")
-                
-                # Final fallback: extract from body
-                if not job_details['job_description']:
-                    body = soup.find('body')
-                    if body:
-                        desc_text = body.get_text().strip()
-                        if desc_text and len(desc_text) > 100:
-                            # Clean up text - add spaces between words that are concatenated
-                            # Add spaces between camelCase and PascalCase
-                            desc_text = re.sub(r'([a-z])([A-Z])', r'\1 \2', desc_text)
-                            # Add spaces between words and numbers
-                            desc_text = re.sub(r'([a-zA-Z])(\d)', r'\1 \2', desc_text)
-                            desc_text = re.sub(r'(\d)([a-zA-Z])', r'\1 \2', desc_text)
-                            # Clean up multiple spaces
-                            desc_text = re.sub(r'\s+', ' ', desc_text)
-                            
-                            job_details['job_description'] = desc_text[:2000]
-                            logger.info(f"   📄 Found description via body fallback (length: {len(desc_text)})")
-            
-            # Debug logging for Wehappi fields
-            logger.info(f"🔍 Job extraction debug (Wehappi fields):")
-            logger.info(f"   📄 Job Name (title): {bool(job_details['job_name'])}")
-            logger.info(f"   📄 Job Type: {bool(job_details['job_type'])}")
-            logger.info(f"   📄 Job Role: {bool(job_details['job_role'])}")
+            # Simple debug logging
+            logger.info(f"🔍 Universal extraction result:")
+            logger.info(f"   📄 Job Name: {bool(job_details['job_name'])}")
             logger.info(f"   📄 Job Description: {bool(job_details['job_description'])}")
-            logger.info(f"   📄 Job Link (url): {bool(job_details['job_link'])}")
+            logger.info(f"   📄 Job Type: {job_details['job_type']}")
             
             # Debug HTML content
-            html_content = result.get('html', '')
             logger.info(f"   📄 HTML content length: {len(html_content)}")
             if html_content:
-                logger.info(f"   📄 HTML preview: {html_content[:500]}...")
-            else:
-                logger.warning(f"   ⚠️ No HTML content found!")
+                logger.info(f"   📄 HTML preview: {html_content[:200]}...")
             
-            # If no job details found, try alternative extraction
-            if not job_details['job_name'] and not job_details['job_description']:
-                logger.info(f"   🔄 No job details found, trying alternative extraction")
-                alternative_job = self._extract_job_alternative_methods(soup, job_url)
-                if alternative_job:
-                    job_details.update(alternative_job)
-            
-            # If still no job details, try extracting from main content area
-            if not job_details['job_name'] and not job_details['job_description']:
-                logger.info(f"   🔄 Trying main content extraction")
-                main_content_job = self._extract_job_from_main_content(soup, job_url)
-                if main_content_job:
-                    job_details.update(main_content_job)
+            # Debug soup content
+            soup_text = soup.get_text().strip()
+            logger.info(f"   📄 Soup text length: {len(soup_text)}")
+            if soup_text:
+                logger.info(f"   📄 Soup text preview: {soup_text[:200]}...")
             
             return job_details
             
@@ -2175,8 +2081,9 @@ class JobExtractionService:
             return "Unknown"
     
     async def _detect_career_page_type(self, career_page_url: str) -> str:
-        """Detect if career page has individual job URLs or embedded jobs"""
+        """Detect if career page has individual job URLs or embedded jobs - OPTIMIZED VERSION"""
         try:
+            logger.info(f"   🔍 ANALYZING CAREER PAGE STRUCTURE: {career_page_url}")
             from bs4 import BeautifulSoup
             from urllib.parse import urljoin
             import re
@@ -2185,12 +2092,13 @@ class JobExtractionService:
             from .crawler import crawl_single_url
             result = await crawl_single_url(career_page_url)
             if not result['success']:
+                logger.info(f"   ❌ Failed to crawl career page for type detection")
                 return "unknown"
             
             html_content = result['html']
             soup = BeautifulSoup(html_content, 'html.parser')
             
-            # Look for individual job URLs first
+            # STEP 1: Quick scan for individual job URLs (simplified validation)
             job_link_patterns = [
                 r'/career/[^"]+', r'/careers/[^"]+', r'/jobs/[^"]+', 
                 r'/positions/[^"]+', r'/opportunities/[^"]+', r'/tuyen-dung/[^"]+',
@@ -2200,47 +2108,176 @@ class JobExtractionService:
                 r'/analyst/[^"]+', r'/specialist/[^"]+', r'/consultant/[^"]+'
             ]
             
-            # Find all links that match job patterns
+            # Find all links that match job patterns (without strict validation)
             all_links = soup.find_all('a', href=True)
-            individual_job_urls = []
+            potential_job_urls = []
             
             for link in all_links:
                 href = link.get('href', '')
                 if not href:
                     continue
-                    
+                
                 full_url = urljoin(career_page_url, href)
                 
-                # Check if URL matches job patterns
+                # Check if URL matches job patterns (simplified check)
                 for pattern in job_link_patterns:
                     if re.search(pattern, full_url, re.IGNORECASE):
-                        if self._is_job_url(full_url):
-                            individual_job_urls.append(full_url)
+                        # Basic validation: not just career page root
+                        if not (full_url.rstrip('/').endswith('/career') or 
+                               full_url.rstrip('/').endswith('/careers') or 
+                               full_url.rstrip('/').endswith('/jobs')):
+                            potential_job_urls.append(full_url)
                             break
             
-            # Remove duplicates and filter
-            individual_job_urls = list(set(individual_job_urls))
-            individual_job_urls = [url for url in individual_job_urls if self._is_job_url(url)]
+            # Remove duplicates
+            potential_job_urls = list(set(potential_job_urls))
+            logger.info(f"   🔗 Found {len(potential_job_urls)} potential individual job URLs")
             
-            if individual_job_urls:
-                logger.info(f"   🔗 Detected INDIVIDUAL URL type: {len(individual_job_urls)} job URLs found")
-                return "individual_urls"
-            else:
-                # Check for embedded jobs
-                direct_jobs = await self._extract_direct_jobs_from_career_page(soup, career_page_url)
-                if direct_jobs:
-                    logger.info(f"   📄 Detected EMBEDDED type: {len(direct_jobs)} embedded jobs found")
-                    return "embedded_jobs"
+            # STEP 2: Test a few URLs to see if they have job content
+            if potential_job_urls:
+                logger.info(f"   🧪 Testing individual URLs for job content...")
+                valid_job_urls = []
+                
+                for i, url in enumerate(potential_job_urls[:3]):  # Test first 3 URLs
+                    logger.info(f"   🧪 Testing URL {i+1}: {url}")
+                    test_result = await self._test_job_url_content(url)
+                    
+                    if test_result and test_result.get('job_name') and len(test_result.get('job_name', '').strip()) > 0:
+                        logger.info(f"   ✅ URL has job content: {test_result.get('job_name')}")
+                        valid_job_urls.append(url)
+                    else:
+                        logger.info(f"   ❌ URL has no job content")
+                
+                if valid_job_urls:
+                    logger.info(f"   🎯 DETECTED: INDIVIDUAL URLS ({len(valid_job_urls)} valid URLs)")
+                    return "individual_urls"
                 else:
-                    logger.info(f"   ❓ Detected UNKNOWN type: No jobs found")
-                    return "unknown"
+                    logger.info(f"   🔄 Individual URLs have no content, checking for embedded jobs...")
+            
+            # STEP 3: Check for embedded jobs
+            logger.info(f"   📄 Checking for embedded jobs...")
+            direct_jobs = await self._extract_direct_jobs_from_career_page(soup, career_page_url)
+            
+            if direct_jobs:
+                logger.info(f"   🎯 DETECTED: EMBEDDED JOBS ({len(direct_jobs)} jobs found)")
+                return "embedded_jobs"
+            else:
+                logger.info(f"   ❓ DETECTED: UNKNOWN (no jobs found)")
+                return "unknown"
                     
         except Exception as e:
             logger.error(f"   ❌ Error detecting career page type: {e}")
             return "unknown"
 
+    async def _test_job_url_content(self, job_url: str) -> dict:
+        """Test if individual job URL has actual job content"""
+        try:
+            from .crawler import crawl_single_url
+            from bs4 import BeautifulSoup
+            import re
+            
+            # Crawl the individual job URL
+            result = await crawl_single_url(job_url)
+            if not result['success']:
+                return {}
+            
+            html_content = result['html']
+            soup = BeautifulSoup(html_content, 'html.parser')
+            
+            # Extract basic job info to test if it has content
+            job_data = {}
+            
+            # Enhanced job title extraction with more specific patterns
+            title_selectors = [
+                # Main title selectors
+                'h1', 'h2', 'h3',
+                # Common job title classes
+                '.job-title', '.position-title', '.job-name', '.title', 
+                '.job-header h1', '.job-header h2', '.job-header h3',
+                # Generic title patterns
+                '[class*="title"]', '[class*="job"]', '[class*="position"]',
+                # Content area titles
+                '.content h1', '.content h2', '.main-content h1', '.main-content h2',
+                # Page title fallback
+                'title'
+            ]
+            
+            for selector in title_selectors:
+                title_elem = soup.select_one(selector)
+                if title_elem:
+                    title_text = title_elem.get_text().strip()
+                    # Filter out generic titles and check for job-related content
+                    if (title_text and len(title_text) > 3 and 
+                        not any(generic in title_text.lower() for generic in 
+                               ['home', 'about', 'contact', 'career', 'careers', 'nsc software', 'welcome'])):
+                        job_data['job_name'] = title_text
+                        break
+            
+            # Enhanced job description extraction
+            desc_selectors = [
+                # Specific job description containers
+                '.job-description', '.job-content', '.description', '.content',
+                '.job-details', '.position-description', '.job-info',
+                # Generic content patterns
+                '[class*="description"]', '[class*="content"]', '[class*="details"]',
+                # Main content areas
+                '.main-content', '.content-area', '.job-section',
+                # Paragraph content
+                'p', '.job-body', '.position-body'
+            ]
+            
+            description_text = ""
+            for selector in desc_selectors:
+                desc_elem = soup.select_one(selector)
+                if desc_elem:
+                    desc_text = desc_elem.get_text().strip()
+                    if desc_text and len(desc_text) > 20:  # Minimum meaningful content
+                        description_text = desc_text
+                        break
+            
+            # If no specific description found, try to get all text content
+            if not description_text:
+                # Remove navigation, header, footer elements
+                for elem in soup(['nav', 'header', 'footer', 'script', 'style']):
+                    elem.decompose()
+                
+                # Get main content text
+                main_content = soup.find('main') or soup.find('article') or soup.find('div', class_=re.compile(r'content|main|body'))
+                if main_content:
+                    description_text = main_content.get_text().strip()
+                else:
+                    description_text = soup.get_text().strip()
+                
+                # Clean up the text
+                description_text = re.sub(r'\s+', ' ', description_text)
+                if len(description_text) > 100:  # Ensure substantial content
+                    job_data['job_description'] = description_text[:500]  # Limit length
+            
+            if description_text and len(description_text) > 20:
+                job_data['job_description'] = description_text[:500]  # Limit length
+            
+            # Additional content validation - check for job-related keywords
+            content_text = (job_data.get('job_name', '') + ' ' + job_data.get('job_description', '')).lower()
+            job_keywords = ['developer', 'engineer', 'manager', 'analyst', 'specialist', 'consultant', 
+                          'experience', 'skills', 'requirements', 'responsibilities', 'salary', 'benefits',
+                          'full-time', 'part-time', 'remote', 'hybrid', 'apply', 'application']
+            
+            has_job_keywords = any(keyword in content_text for keyword in job_keywords)
+            
+            # If we found job name OR substantial content with job keywords, consider it valid
+            if job_data.get('job_name') or (len(description_text) > 50 and has_job_keywords):
+                logger.info(f"   ✅ Job URL has content: {job_data.get('job_name', 'No title')[:50]}...")
+                return job_data
+            else:
+                logger.info(f"   ❌ Job URL has no meaningful content: {job_url}")
+                return {}
+                
+        except Exception as e:
+            logger.error(f"   ❌ Error testing job URL content: {e}")
+            return {}
+
     async def _extract_job_urls_from_career_page(self, career_page_url: str) -> List[str]:
-        """Extract job URLs directly from career page HTML"""
+        """Extract job URLs directly from career page HTML - OPTIMIZED VERSION"""
         try:
             from bs4 import BeautifulSoup
             from urllib.parse import urljoin
@@ -2248,6 +2285,7 @@ class JobExtractionService:
             
             # Detect career page type first
             page_type = await self._detect_career_page_type(career_page_url)
+            logger.info(f"   🎯 DETECTED PAGE TYPE: {page_type}")
             
             if page_type == "embedded_jobs":
                 # For embedded jobs, extract and cache them, return empty list for URLs
@@ -2271,7 +2309,7 @@ class JobExtractionService:
                     return []
             
             elif page_type == "individual_urls":
-                # For individual URLs, extract them
+                # For individual URLs, extract them using the same logic as detection
                 from .crawler import crawl_single_url
                 result = await crawl_single_url(career_page_url)
                 if not result['success']:
@@ -2282,34 +2320,14 @@ class JobExtractionService:
                 
                 job_urls = []
                 
-                # Method 1: Look for job links with EXPANDED patterns for better detection
+                # Use the same patterns as detection
                 job_link_patterns = [
-                    # Standard career patterns
                     r'/career/[^"]+', r'/careers/[^"]+', r'/jobs/[^"]+', 
                     r'/positions/[^"]+', r'/opportunities/[^"]+', r'/tuyen-dung/[^"]+',
                     r'/recruitment/[^"]+', r'/vacancies/[^"]+', r'/openings/[^"]+',
                     r'/apply/[^"]+', r'/employment/[^"]+', r'/hiring/[^"]+',
-                    # Job-specific patterns
                     r'/developer/[^"]+', r'/engineer/[^"]+', r'/manager/[^"]+',
-                    r'/analyst/[^"]+', r'/specialist/[^"]+', r'/consultant/[^"]+',
-                    r'/coordinator/[^"]+', r'/assistant/[^"]+', r'/director/[^"]+',
-                    r'/lead/[^"]+', r'/senior/[^"]+', r'/junior/[^"]+',
-                    r'/intern/[^"]+', r'/trainee/[^"]+', r'/graduate/[^"]+',
-                    # Technology patterns
-                    r'/java/[^"]+', r'/php/[^"]+', r'/python/[^"]+', r'/javascript/[^"]+',
-                    r'/react/[^"]+', r'/angular/[^"]+', r'/vue/[^"]+', r'/node/[^"]+',
-                    r'/spring/[^"]+', r'/laravel/[^"]+', r'/frontend/[^"]+', r'/backend/[^"]+',
-                    r'/fullstack/[^"]+', r'/full-stack/[^"]+', r'/mobile/[^"]+', r'/ios/[^"]+',
-                    r'/android/[^"]+', r'/flutter/[^"]+', r'/react-native/[^"]+',
-                    r'/devops/[^"]+', r'/cloud/[^"]+', r'/aws/[^"]+', r'/azure/[^"]+',
-                    r'/kubernetes/[^"]+', r'/docker/[^"]+', r'/jenkins/[^"]+',
-                    # Vietnamese patterns
-                    r'/tuyen-dung/[^"]+', r'/viec-lam/[^"]+', r'/co-hoi/[^"]+',
-                    r'/nhan-vien/[^"]+', r'/ung-vien/[^"]+', r'/cong-viec/[^"]+',
-                    r'/lam-viec/[^"]+', r'/thu-viec/[^"]+', r'/chinh-thuc/[^"]+',
-                    r'/nghe-nghiep/[^"]+', r'/tim-viec/[^"]+', r'/dang-tuyen/[^"]+',
-                    r'/vi-tri/[^"]+', r'/cong-viec/[^"]+', r'/tuyen-dung/[^"]+',
-                    r'/ung-tuyen/[^"]+', r'/ho-so/[^"]+', r'/phong-van/[^"]+'
+                    r'/analyst/[^"]+', r'/specialist/[^"]+', r'/consultant/[^"]+'
                 ]
                 
                 # Find all links that match job patterns
@@ -2322,10 +2340,13 @@ class JobExtractionService:
                         
                     full_url = urljoin(career_page_url, href)
                     
-                    # Check if URL matches job patterns
+                    # Check if URL matches job patterns (simplified validation)
                     for pattern in job_link_patterns:
                         if re.search(pattern, full_url, re.IGNORECASE):
-                            if self._is_job_url(full_url):
+                            # Basic validation: not just career page root
+                            if not (full_url.rstrip('/').endswith('/career') or 
+                                   full_url.rstrip('/').endswith('/careers') or 
+                                   full_url.rstrip('/').endswith('/jobs')):
                                 job_urls.append(full_url)
                                 logger.info(f"   🔗 Found job URL: {full_url}")
                                 break
@@ -2336,9 +2357,9 @@ class JobExtractionService:
                 return job_urls
             
             else:  # unknown type
-                logger.warning(f"   ❓ Unknown career page type, trying both methods")
+                logger.warning(f"   ❓ Unknown career page type, no job URLs found")
                 return []
-                
+            
         except Exception as e:
             logger.error(f"   ❌ Error extracting job URLs: {e}")
             return []
