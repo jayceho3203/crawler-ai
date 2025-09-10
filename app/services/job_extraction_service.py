@@ -784,9 +784,9 @@ class JobExtractionService:
             # 3) Structured single-page parsing fallback
             logger.info("   🔍 Step 3: Try structured single-page fallback")
             fallback = await self._extract_jobs_from_single_page(
-                    career_page_url, max_jobs, include_hidden_jobs=True, include_job_details=False
-                )
-                
+                career_page_url, max_jobs, include_hidden_jobs=True, include_job_details=False
+            )
+            
             has_individual_urls = False
             total_jobs_found = 0
             direct_jobs_data: List[Dict] = []
@@ -805,13 +805,13 @@ class JobExtractionService:
             crawl_time = (time.time() - start_time)
 
             response = {
-                'success': True,
-                'career_page_url': career_page_url,
-                'total_jobs_found': total_jobs_found,
-                'has_individual_urls': has_individual_urls,
+                    'success': True,
+                    'career_page_url': career_page_url,
+                    'total_jobs_found': total_jobs_found,
+                    'has_individual_urls': has_individual_urls,
                 'job_urls': urls_from_analysis,
                 'job_indices': [] if has_individual_urls or total_jobs_found == 0 else list(range(1, total_jobs_found + 1)),
-                'crawl_time': crawl_time,
+                    'crawl_time': crawl_time,
                 'crawl_method': 'scrapy_optimized',
                 'detection_method': 'links_detected' if has_individual_urls else ('container_based' if total_jobs_found > 0 else 'none'),
                 'extraction_stage': 'links_detected' if has_individual_urls else ('container_detected' if total_jobs_found > 0 else 'none')
@@ -923,7 +923,7 @@ class JobExtractionService:
     
     async def _validate_job_with_ai(self, job_data: Dict, job_url: str) -> bool:
         """
-        Use AI to validate if extracted content is actually a job posting
+        Enhanced AI validation to reject non-job URLs effectively
         Returns True if valid job, False if not
         """
         try:
@@ -933,49 +933,94 @@ class JobExtractionService:
             company = job_data.get('company', '').strip()
             location = job_data.get('location', '').strip()
             
-            # Quick heuristic checks first (fast, free)
-            if not title or len(title) < 3:
-                logger.info(f"   🤖 Heuristic: Rejected - No valid title")
+            # 1. URL PATTERN CHECKS - Reject obvious non-job URLs
+            url_lower = job_url.lower()
+            
+            # Non-job URL patterns (Vietnamese + English)
+            non_job_url_patterns = [
+                '/chinh-sach-bao-mat', '/privacy-policy', '/privacy',
+                '/dieu-khoan-dich-vu', '/terms-of-service', '/terms',
+                '/cookie-policy', '/cookies', '/legal',
+                '/about', '/about-us', '/gioi-thieu',
+                '/contact', '/lien-he', '/lien-lac',
+                '/news', '/tin-tuc', '/blog',
+                '/services', '/dich-vu', '/san-pham', '/products',
+                '/home', '/homepage', '/trang-chu',
+                '/login', '/register', '/sign-up', '/dang-nhap', '/dang-ky',
+                '/en/', '/english/', '/lang/',
+                '.jpg', '.png', '.gif', '.pdf', '.doc', '.docx'
+            ]
+            
+            for pattern in non_job_url_patterns:
+                if pattern in url_lower:
+                    logger.info(f"   🤖 URL REJECT - Non-job URL pattern: {pattern}")
+                    return False
+            
+            # 2. EMPTY CONTENT CHECKS - More strict
+            if not title and not description:
+                logger.info(f"   🤖 CONTENT REJECT - Both title and description are empty")
                 return False
             
-            if not description or len(description) < 50:
-                logger.info(f"   🤖 Heuristic: Rejected - Description too short")
+            if not description or len(description.strip()) < 30:
+                logger.info(f"   🤖 CONTENT REJECT - Description too short or empty (length: {len(description)})")
                 return False
             
-            # Enhanced validation with multiple keyword categories
+            # 3. CRITICAL REJECTION KEYWORDS - Definitely not a job
             content_lower = f"{title} {description}".lower()
             
-            # 1. CRITICAL REJECTION - Definitely not a job
             critical_reject = [
-                '404', 'not found', 'page not found', 'error',
-                'privacy policy', 'terms of service', 'cookie policy',
-                'login', 'register', 'sign up', 'sign in'
+                # Error pages
+                '404', 'not found', 'page not found', 'error', 'trang không tìm thấy',
+                # Policy pages
+                'privacy policy', 'chính sách bảo mật', 'terms of service', 'điều khoản dịch vụ',
+                'cookie policy', 'chính sách cookie', 'legal notice', 'thông báo pháp lý',
+                # Company pages
+                'about us', 'giới thiệu công ty', 'company overview', 'tổng quan công ty',
+                'our story', 'câu chuyện của chúng tôi', 'company history', 'lịch sử công ty',
+                'our team', 'đội ngũ của chúng tôi', 'leadership team', 'ban lãnh đạo',
+                'mission vision', 'tầm nhìn sứ mệnh', 'core values', 'giá trị cốt lõi',
+                # Contact/Service pages
+                'contact us', 'liên hệ với chúng tôi', 'get in touch', 'contact information',
+                'our services', 'dịch vụ của chúng tôi', 'service portfolio', 'danh mục dịch vụ',
+                'our products', 'sản phẩm của chúng tôi', 'product catalog', 'danh mục sản phẩm',
+                # Login/Register
+                'login', 'đăng nhập', 'register', 'đăng ký', 'sign up', 'sign in',
+                'create account', 'tạo tài khoản', 'forgot password', 'quên mật khẩu'
             ]
             
             for indicator in critical_reject:
                 if indicator in content_lower:
-                    logger.info(f"   🤖 Heuristic: CRITICAL REJECT - Contains non-job indicator: {indicator}")
+                    logger.info(f"   🤖 CRITICAL REJECT - Contains non-job keyword: {indicator}")
                     return False
             
-            # 2. WARNING INDICATORS - Might not be a job, but check other factors
-            warning_indicators = [
-                'about us', 'main page', 'home page', 'welcome',
-                'company overview', 'our story', 'team'
-            ]
-            
-            warning_count = 0
-            for indicator in warning_indicators:
-                if indicator in content_lower:
-                    warning_count += 1
-                    logger.info(f"   🤖 Heuristic: WARNING - Contains warning indicator: {indicator}")
-            
-            # 3. POSITIVE JOB INDICATORS - Strong signals this is a job
+            # 4. POSITIVE JOB INDICATORS - Enhanced list
             positive_job_indicators = [
-                'responsibilities', 'requirements', 'qualifications', 'skills',
-                'experience', 'salary', 'benefits', 'apply', 'application',
-                'full-time', 'part-time', 'contract', 'remote', 'hybrid',
+                # Job posting keywords (English)
+                'responsibilities', 'requirements', 'qualifications', 'skills required',
+                'job description', 'position summary', 'role overview', 'what you will do',
+                'we are looking for', 'ideal candidate', 'successful candidate',
+                'experience', 'years of experience', 'education', 'degree',
+                'salary', 'compensation', 'benefits', 'package', 'bonus',
+                'apply', 'application', 'submit cv', 'send resume',
+                'full-time', 'part-time', 'contract', 'temporary', 'permanent',
+                'remote', 'hybrid', 'on-site', 'work from home',
                 'developer', 'engineer', 'manager', 'analyst', 'designer',
-                'job description', 'position', 'role', 'vacancy', 'opening'
+                'specialist', 'coordinator', 'assistant', 'executive',
+                'senior', 'junior', 'lead', 'principal', 'intern',
+                'vacancy', 'opening', 'opportunity', 'hiring',
+                # Vietnamese job keywords
+                'trách nhiệm', 'yêu cầu', 'kỹ năng', 'kinh nghiệm',
+                'mô tả công việc', 'vị trí tuyển dụng', 'ứng viên lý tưởng',
+                'bạn sẽ làm gì', 'chúng tôi đang tìm kiếm',
+                'học vấn', 'bằng cấp', 'chứng chỉ',
+                'lương', 'mức lương', 'phúc lợi', 'chế độ đãi ngộ',
+                'ứng tuyển', 'nộp hồ sơ', 'gửi cv', 'làm việc toàn thời gian',
+                'làm việc bán thời gian', 'hợp đồng', 'thời vụ',
+                'làm việc từ xa', 'làm việc tại nhà', 'hybrid',
+                'lập trình viên', 'kỹ sư', 'quản lý', 'phân tích',
+                'thiết kế', 'chuyên viên', 'điều phối viên', 'trợ lý',
+                'giám đốc', 'cấp cao', 'cấp thấp', 'trưởng nhóm',
+                'thực tập sinh', 'vị trí tuyển dụng', 'cơ hội việc làm'
             ]
             
             positive_count = 0
@@ -983,24 +1028,31 @@ class JobExtractionService:
                 if indicator in content_lower:
                     positive_count += 1
             
-            # 4. DECISION LOGIC
-            if warning_count > 2 and positive_count < 2:
-                logger.info(f"   🤖 Heuristic: REJECTED - Too many warnings ({warning_count}) and too few positive indicators ({positive_count})")
+            logger.info(f"   🤖 Analysis: positive indicators = {positive_count}")
+            
+            # 5. ENHANCED DECISION LOGIC - More strict
+            if positive_count == 0:
+                logger.info(f"   🤖 REJECT - No positive job indicators found")
                 return False
             elif positive_count >= 3:
-                logger.info(f"   🤖 Heuristic: ACCEPTED - Strong positive indicators ({positive_count})")
+                logger.info(f"   🤖 ACCEPT - Strong positive indicators ({positive_count})")
                 return True
-            elif positive_count >= 1 and warning_count <= 1:
-                logger.info(f"   🤖 Heuristic: ACCEPTED - Some positive indicators ({positive_count}) and few warnings ({warning_count})")
-                return True
+            elif positive_count >= 1:
+                # Additional checks for borderline cases
+                if len(title) > 5 and any(word in title.lower() for word in ['tuyển dụng', 'hiring', 'job', 'position', 'developer', 'engineer', 'manager']):
+                    logger.info(f"   🤖 ACCEPT - Job-related title with some indicators ({positive_count})")
+                    return True
+                else:
+                    logger.info(f"   🤖 REJECT - Few indicators and non-job title ({positive_count})")
+                    return False
             else:
-                logger.info(f"   🤖 Heuristic: ACCEPTED - Default acceptance (positives: {positive_count}, warnings: {warning_count})")
-                return True
+                logger.info(f"   🤖 REJECT - Insufficient job indicators ({positive_count})")
+                return False
             
         except Exception as e:
             logger.error(f"   🤖 AI Validation Error: {e}")
-            # If AI validation fails, default to accepting (conservative approach)
-            return True
+            # Default to rejecting on error (more conservative for non-jobs)
+            return False
     
     async def _ai_validate_job_content(self, title: str, description: str, company: str, location: str, job_url: str) -> bool:
         """
@@ -1108,16 +1160,20 @@ class JobExtractionService:
                 logger.info(f"   📄 Processing individual job page: {job_url}")
                 result = await self._extract_individual_job_details(job_url, start_time)
             
-            # AI Validation: Check if extracted content is actually a job
-            if result.get('success') and result.get('job'):
-                job_data = result['job']
+            # AI Validation: Always validate, even with empty content
+            logger.info(f"   🤖 Starting AI Validation for: {job_url}")
+            if result.get('success'):
+                job_data = result.get('job', {})
+                logger.info(f"   🤖 Job data for validation: title='{job_data.get('title', '')}', desc_len={len(job_data.get('description', ''))}")
                 is_valid_job = await self._validate_job_with_ai(job_data, job_url)
                 
                 if not is_valid_job:
                     logger.warning(f"   🤖 AI Validation: Rejected as non-job content")
                     return self._empty_job_response(job_url, 'AI validation failed: Content is not a valid job posting')
-            else:
+                else:
                     logger.info(f"   🤖 AI Validation: Passed - Valid job content")
+            else:
+                logger.warning(f"   🤖 Skipping AI Validation - extraction failed")
             
             return result
                 
@@ -1178,7 +1234,7 @@ class JobExtractionService:
                 return self._format_job_response(job_data, career_url)
             else:
                 return self._empty_job_response(career_url, 'No jobs found on career page')
-                
+            
         except Exception as e:
             logger.error(f"❌ Error extracting from career page: {e}")
             return self._empty_job_response(career_url, str(e))
@@ -2098,7 +2154,83 @@ class JobExtractionService:
             html_content = result['html']
             soup = BeautifulSoup(html_content, 'html.parser')
             
-            # STEP 1: Quick scan for individual job URLs (simplified validation)
+            # STEP 1: Check if this is a main career page (contains individual job URLs)
+            url_lower = career_page_url.lower()
+            
+            # Main career page patterns (contains individual job URLs)
+            main_career_patterns = [
+                '/career/', '/careers/', '/jobs/', '/tuyen-dung/', '/viec-lam/',
+                '/opportunities/', '/positions/', '/openings/', '/vacancies/'
+            ]
+            
+            is_main_career_page = any(pattern in url_lower for pattern in main_career_patterns)
+            
+            if is_main_career_page:
+                # Check if it contains individual job URLs (not just category links)
+                individual_job_links = []
+                for link in soup.find_all('a', href=True):
+                    href = link.get('href', '')
+                    if not href:
+                        continue
+                    
+                    full_url = urljoin(career_page_url, href)
+                    
+                    # Look for individual job URL patterns (more comprehensive)
+                    job_url_patterns = [
+                        r'/[^/]+-developer/?$',
+                        r'/[^/]+-analyst/?$', 
+                        r'/[^/]+-tester/?$',
+                        r'/[^/]+-designer/?$',
+                        r'/[^/]+-manager/?$',
+                        r'/[^/]+-specialist/?$',
+                        r'/[^/]+-engineer/?$',
+                        r'/[^/]+-content/?$',
+                        r'/[^/]+-technical/?$',
+                        r'/[^/]+-executive/?$',
+                        r'/[^/]+-coordinator/?$',
+                        r'/[^/]+-assistant/?$',
+                        r'/[^/]+-frontend/?$',
+                        r'/[^/]+-backend/?$',
+                        r'/[^/]+-fullstack/?$',
+                        r'/[^/]+-devops/?$',
+                        r'/[^/]+-qa/?$',
+                        r'/[^/]+-seo/?$',
+                        r'/[^/]+-marketing/?$',
+                        r'/[^/]+-sales/?$',
+                        r'/[^/]+-hr/?$',
+                        r'/[^/]+-admin/?$',
+                        r'/[^/]+-lead/?$',
+                        r'/[^/]+-senior/?$',
+                        r'/[^/]+-junior/?$',
+                        r'/[^/]+-intern/?$'
+                    ]
+                    
+                    for pattern in job_url_patterns:
+                        if re.search(pattern, full_url, re.IGNORECASE):
+                            individual_job_links.append(full_url)
+                            break
+                
+                if individual_job_links:
+                    logger.info(f"   🎯 DETECTED: individual_urls (main career page with {len(individual_job_links)} job URLs: {career_page_url})")
+                    return "individual_urls"
+                else:
+                    logger.info(f"   🎯 DETECTED: embedded_jobs (main career page without individual URLs: {career_page_url})")
+                    return "embedded_jobs"
+            
+            # STEP 2: Check if this is a category page (contains multiple job listings)
+            category_indicators = [
+                'business-development', 'marketing', 'information-technology',
+                'engineering', 'sales', 'hr', 'finance', 'operations',
+                'design', 'product', 'data', 'security', 'devops'
+            ]
+            
+            is_category_page = any(indicator in url_lower for indicator in category_indicators)
+            
+            if is_category_page:
+                logger.info(f"   🎯 DETECTED: embedded_jobs (category page: {career_page_url})")
+                return "embedded_jobs"
+            
+            # STEP 3: Quick scan for individual job URLs (simplified validation)
             job_link_patterns = [
                 r'/career/[^"]+', r'/careers/[^"]+', r'/jobs/[^"]+', 
                 r'/positions/[^"]+', r'/opportunities/[^"]+', r'/tuyen-dung/[^"]+',
