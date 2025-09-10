@@ -858,27 +858,25 @@ class JobExtractionService:
             if result['success'] and result['html']:
                 soup = BeautifulSoup(result['html'], 'html.parser')
                 container_jobs = self._extract_jobs_from_cards(soup, career_page_url)
-            else:
+                else:
                 container_jobs = []
             
             if container_jobs:
-                # Normalize titles/locations and dedupe
-                normalized = self._normalize_jobs(container_jobs)
-                self._direct_jobs_cache = normalized
-                JobExtractionService._global_direct_jobs_cache = normalized
+                self._direct_jobs_cache = container_jobs
+                JobExtractionService._global_direct_jobs_cache = container_jobs
                 crawl_time = (time.time() - start_time)
                 response = {
                     'success': True,
                     'career_page_url': career_page_url,
-                    'total_jobs_found': len(normalized),
+                    'total_jobs_found': len(container_jobs),
                     'has_individual_urls': False,
                     'job_urls': [],
-                    'job_indices': list(range(1, len(normalized) + 1)),
+                    'job_indices': list(range(1, len(container_jobs) + 1)),
                     'crawl_time': crawl_time,
                     'crawl_method': 'scrapy_optimized',
                     'detection_method': 'pattern_matching',
                     'extraction_stage': 'pattern_detected',
-                    'direct_jobs': normalized
+                    'direct_jobs': container_jobs
                 }
                 # Cache career page for details API
                 self._career_page_cache = career_page_url
@@ -948,7 +946,7 @@ class JobExtractionService:
                 # Fallback to embedded jobs
                 return await self._extract_embedded_jobs(career_page_url, max_jobs, start_time)
             
-            else:
+                else:
                 logger.warning("   ⚠️ Unknown strategy, falling back to embedded jobs extraction")
                 return await self._extract_embedded_jobs(career_page_url, max_jobs, start_time)
                 
@@ -1169,12 +1167,12 @@ class JobExtractionService:
                 if len(title) > 5 and any(word in title.lower() for word in ['tuyển dụng', 'hiring', 'job', 'position', 'developer', 'engineer', 'manager']):
                     logger.info(f"   🤖 ACCEPT - Job-related title with some indicators ({positive_count})")
                     return True
-                else:
-                    logger.info(f"   🤖 REJECT - Few indicators and non-job title ({positive_count})")
-                    return False
             else:
-                logger.info(f"   🤖 REJECT - Insufficient job indicators ({positive_count})")
+                logger.info(f"   🤖 REJECT - Few indicators and non-job title ({positive_count})")
                 return False
+        else:
+            logger.info(f"   🤖 REJECT - Insufficient job indicators ({positive_count})")
+            return False
             
         except Exception as e:
             logger.error(f"   🤖 AI Validation Error: {e}")
@@ -1246,7 +1244,7 @@ class JobExtractionService:
             logger.info(f"   🤖 Validation Score: {score}/7 - {'Valid' if is_valid else 'Invalid'}")
             return is_valid
             
-        except Exception as e:
+                    except Exception as e:
             logger.error(f"   🤖 Lightweight AI Error: {e}")
             return True  # Default to accepting
     
@@ -1457,7 +1455,7 @@ class JobExtractionService:
             h1_elements = soup.find_all('h1')
             for h1 in h1_elements:
                 title_text = h1.get_text().strip()
-                if title_text and len(title_text) > 3:
+                    if title_text and len(title_text) > 3:
                     # Filter out generic titles
                     if not any(generic in title_text.lower() for generic in 
                              ['home', 'about', 'contact', 'career', 'careers', 'welcome', 'blog', 'news']):
@@ -1496,7 +1494,7 @@ class JobExtractionService:
                 if len(all_text) > 50:
                     job_details['job_description'] = all_text[:5000]  # Limit for Agent to summarize
                     logger.info(f"   📄 Found description via universal extraction (length: {len(all_text)})")
-                else:
+                    else:
                     logger.warning(f"   ⚠️ Content too short: {len(all_text)} chars")
             
             # Extract job type from content
@@ -1954,43 +1952,6 @@ class JobExtractionService:
         
         return jobs
     
-    def _normalize_jobs(self, jobs: List[Dict]) -> List[Dict]:
-        """Normalize extracted jobs: clean titles, infer locations, remove duplicates."""
-        import re
-        normalized_jobs: List[Dict] = []
-        seen_titles: set = set()
-        
-        for job in jobs:
-            original_title = (job.get('title') or '').strip()
-            description_text = (job.get('description') or '').strip()
-            combined_text = f"{original_title} {description_text}"
-            
-            # Clean title suffixes and prefixes
-            clean_title = re.sub(r"\s*(Singapore Only|Fully Remote|Remote|See Details|See)\s*$", "", original_title).strip()
-            clean_title = re.sub(r"^com\s*", "", clean_title).strip()
-            clean_title = re.sub(r"\s+", " ", clean_title).strip()
-            
-            # Infer location if missing
-            if not job.get('location'):
-                if re.search(r"Singapore Only", combined_text, re.IGNORECASE):
-                    job['location'] = 'Singapore Only'
-                elif re.search(r"Fully Remote", combined_text, re.IGNORECASE):
-                    job['location'] = 'Fully Remote'
-                elif re.search(r"\bRemote\b", combined_text, re.IGNORECASE):
-                    job['location'] = 'Remote'
-            
-            # Apply cleaned title
-            job['title'] = clean_title
-            
-            # Deduplicate by cleaned title
-            title_key = clean_title.lower()
-            if not clean_title or title_key in seen_titles:
-                continue
-            seen_titles.add(title_key)
-            normalized_jobs.append(job)
-        
-        return normalized_jobs
-    
     def _parse_job_text(self, job_text: str, career_page_url: str, job_index: int, site_type: str) -> Dict:
         """Parse job text to extract structured data"""
         try:
@@ -2383,7 +2344,7 @@ class JobExtractionService:
                 if not href:
                     continue
                 
-                full_url = urljoin(career_page_url, href)
+                        full_url = urljoin(career_page_url, href)
                 
                 # Check if URL matches job patterns (simplified check)
                 for pattern in job_link_patterns:
@@ -2613,9 +2574,9 @@ class JobExtractionService:
                             if not (full_url.rstrip('/').endswith('/career') or 
                                    full_url.rstrip('/').endswith('/careers') or 
                                    full_url.rstrip('/').endswith('/jobs')):
-                                job_urls.append(full_url)
-                                logger.info(f"   🔗 Found job URL: {full_url}")
-                                break
+                        job_urls.append(full_url)
+                        logger.info(f"   🔗 Found job URL: {full_url}")
+                        break
                 
                 # Remove duplicates
                 job_urls = list(set(job_urls))
