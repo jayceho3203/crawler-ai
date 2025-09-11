@@ -1325,9 +1325,26 @@ class JobExtractionService:
         try:
             logger.info(f"📄 Extracting job details from: {job_url}")
             
-            # CLEAR CACHE FIRST to prevent data mixing between different companies
-            self.clear_all_cache()
-            logger.info("   🗑️ Cleared all cache to prevent data mixing")
+            # STEP 1: Always ensure cache is populated first
+            if not getattr(JobExtractionService, '_global_direct_jobs_cache', []):
+                logger.info("   📄 Cache empty, populating from career page first")
+                await self.extract_job_urls_only(job_url)
+                logger.info("   ✅ Cache populated successfully")
+            
+            # STEP 2: Clear cache only if it's from a different company
+            current_cache = getattr(JobExtractionService, '_global_direct_jobs_cache', [])
+            if current_cache:
+                # Check if cache is from same domain
+                from urllib.parse import urlparse
+                current_domain = urlparse(job_url).netloc
+                cached_domain = urlparse(current_cache[0].get('source_url', '')).netloc
+                if current_domain != cached_domain:
+                    logger.info("   🗑️ Different company detected, clearing cache")
+                    self.clear_all_cache()
+                    # Repopulate cache for current company
+                    await self.extract_job_urls_only(job_url)
+            else:
+                logger.info("   🗑️ No cache found, will populate during extraction")
             
             # Infer index from URL fragment if present
             if job_index is None and '#job-' in job_url:
@@ -1416,8 +1433,8 @@ class JobExtractionService:
                 logger.info(f"   📄 Found {len(direct_jobs)} jobs in cache")
                 logger.info(f"   📄 Cache jobs: {[job.get('title', 'No title') for job in direct_jobs]}")
                 
-                # Extract specific job by index (1-based)
-                if job_index and 1 <= job_index <= len(direct_jobs):
+                # Extract specific job by index (1-based) with validation
+                if self._validate_job_index(job_index, len(direct_jobs)):
                     job_data = direct_jobs[job_index - 1]
                     logger.info(f"   ✅ Found job {job_index}: {job_data.get('title', 'Unknown')}")
                     logger.info(f"   📄 Job data: {job_data}")
@@ -1434,9 +1451,30 @@ class JobExtractionService:
                     job_data = direct_jobs[0]
                     return self._format_job_response(job_data, career_url, job_index=1)
             
-            # If no cache, extract directly from career page
+            # If no cache, extract directly from career page using embedded jobs logic
             logger.info(f"   📄 No cache found, extracting directly from career page")
-            return await self._extract_individual_job_details(career_url, start_time)
+            from .crawler import crawl_single_url
+            from bs4 import BeautifulSoup
+            
+            result = await crawl_single_url(career_url)
+            if not result['success']:
+                return self._empty_job_response(career_url, 'Failed to crawl career page')
+            
+            html_content = result['html']
+            soup = BeautifulSoup(html_content, 'html.parser')
+            
+            # Extract embedded jobs from career page
+            direct_jobs = await self._extract_direct_jobs_from_career_page(soup, career_url)
+            if direct_jobs and self._validate_job_index(job_index, len(direct_jobs)):
+                job_data = direct_jobs[job_index - 1]
+                return self._format_job_response(job_data, career_url, job_index=job_index)
+            elif direct_jobs and len(direct_jobs) > 0:
+                # Default to first job if index is invalid
+                logger.warning(f"   ⚠️ Invalid job index {job_index}, default to 1 (available: 1-{len(direct_jobs)})")
+                job_data = direct_jobs[0]
+                return self._format_job_response(job_data, career_url, job_index=1)
+            else:
+                return self._empty_job_response(career_url, 'No jobs found on career page')
             
         except Exception as e:
             logger.error(f"❌ Error extracting specific job from career page: {e}")
@@ -1501,6 +1539,12 @@ class JobExtractionService:
         except Exception as e:
             logger.error(f"❌ Error extracting individual job details: {e}")
             return self._empty_job_response(job_url, str(e))
+    
+    def _validate_job_index(self, job_index: int, available_jobs: int) -> bool:
+        """Validate job index is within range"""
+        if not job_index or not isinstance(job_index, int):
+            return False
+        return 1 <= job_index <= available_jobs
     
     def _is_career_page_url(self, url: str) -> bool:
         """Check if URL is a career page (not a specific job page)"""
