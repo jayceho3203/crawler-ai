@@ -808,9 +808,15 @@ class JobExtractionService:
             }
 
     async def _extract_individual_job_urls(self, career_page_url: str, max_jobs: int, start_time: float) -> Dict:
-        """Extract individual job URLs using the traditional method"""
+        """Extract individual job URLs using the improved method"""
         try:
-            job_urls = await self._extract_job_urls_from_career_page(career_page_url)
+            # Use the improved detection logic
+            page_type = await self._detect_career_page_type(career_page_url)
+            if page_type == 'individual_urls':
+                job_urls = await self._extract_job_urls_from_career_page(career_page_url)
+            else:
+                # Fallback to traditional method
+                job_urls = await self._extract_job_urls_from_career_page(career_page_url)
             if job_urls:
                 crawl_time = (time.time() - start_time)
                 response = {
@@ -2546,40 +2552,74 @@ class JobExtractionService:
                             potential_job_urls.append(full_url)
                             break
             
-            # Remove duplicates
-            potential_job_urls = list(set(potential_job_urls))
+            # Remove duplicates and anchor links
+            clean_urls = []
+            seen_base_urls = set()
+            
+            for url in potential_job_urls:
+                # Remove anchor links (everything after #)
+                base_url = url.split('#')[0]
+                if base_url not in seen_base_urls:
+                    clean_urls.append(base_url)
+                    seen_base_urls.add(base_url)
+            
+            potential_job_urls = clean_urls
             logger.info(f"   🔗 Found {len(potential_job_urls)} potential individual job URLs")
             
             # STEP 2: Test a few URLs to see if they have job content
             if potential_job_urls:
                 logger.info(f"   🧪 Testing individual URLs for job content...")
+                logger.info(f"   📊 DEBUG: Found {len(potential_job_urls)} potential URLs to test")
                 valid_job_urls = []
                 
-                for i, url in enumerate(potential_job_urls[:3]):  # Test first 3 URLs
-                    logger.info(f"   🧪 Testing URL {i+1}: {url}")
+                for i, url in enumerate(potential_job_urls[:10]):  # Test first 10 URLs
+                    logger.info(f"   🧪 Testing URL {i+1}/{min(10, len(potential_job_urls))}: {url}")
                     test_result = await self._test_job_url_content(url)
+                    logger.info(f"   📊 DEBUG: Test result for {url}: {test_result}")
                     
                     if test_result and test_result.get('job_name') and len(test_result.get('job_name', '').strip()) > 0:
                         logger.info(f"   ✅ URL has job content: {test_result.get('job_name')}")
                         valid_job_urls.append(url)
                     else:
                         logger.info(f"   ❌ URL has no job content")
+                        logger.info(f"   📊 DEBUG: Job name: '{test_result.get('job_name', '')}', Length: {len(test_result.get('job_name', '').strip()) if test_result else 'N/A'}")
+                
+                logger.info(f"   📊 DEBUG: Valid job URLs found: {len(valid_job_urls)} out of {len(potential_job_urls)} tested")
                 
                 if valid_job_urls:
                     logger.info(f"   🎯 DETECTED: INDIVIDUAL URLS ({len(valid_job_urls)} valid URLs)")
                     return "individual_urls"
                 else:
-                    logger.info(f"   🔄 Individual URLs have no content, checking for embedded jobs...")
+                    # If we found many potential URLs but none have content, 
+                    # it might be a site with individual URLs but different structure
+                    logger.info(f"   📊 DEBUG: No valid job URLs found from content testing")
+                    logger.info(f"   📊 DEBUG: Potential URLs count: {len(potential_job_urls)}")
+                    
+                    if len(potential_job_urls) >= 10:
+                        logger.info(f"   🔄 Found {len(potential_job_urls)} potential URLs but no content detected")
+                        logger.info(f"   🎯 DETECTED: INDIVIDUAL URLS (bypassing content test for high-volume sites)")
+                        return "individual_urls"
+                    elif len(potential_job_urls) >= 5:
+                        logger.info(f"   🔄 Found {len(potential_job_urls)} potential URLs but no content detected")
+                        logger.info(f"   🎯 DETECTED: INDIVIDUAL URLS (bypassing content test)")
+                        return "individual_urls"
+                    else:
+                        logger.info(f"   🔄 Individual URLs have no content, checking for embedded jobs...")
+                        logger.info(f"   📊 DEBUG: Falling back to embedded jobs detection")
             
             # STEP 3: Check for embedded jobs
             logger.info(f"   📄 Checking for embedded jobs...")
+            logger.info(f"   📊 DEBUG: About to call _extract_direct_jobs_from_career_page")
             direct_jobs = await self._extract_direct_jobs_from_career_page(soup, career_page_url)
+            logger.info(f"   📊 DEBUG: _extract_direct_jobs_from_career_page returned {len(direct_jobs) if direct_jobs else 0} jobs")
             
             if direct_jobs:
                 logger.info(f"   🎯 DETECTED: EMBEDDED JOBS ({len(direct_jobs)} jobs found)")
+                logger.info(f"   📊 DEBUG: First few job titles: {[job.get('title', 'No title') for job in direct_jobs[:3]]}")
                 return "embedded_jobs"
             else:
                 logger.info(f"   ❓ DETECTED: UNKNOWN (no jobs found)")
+                logger.info(f"   📊 DEBUG: No embedded jobs found, returning unknown")
                 return "unknown"
                     
         except Exception as e:
@@ -2710,7 +2750,70 @@ class JobExtractionService:
             page_type = await self._detect_career_page_type(career_page_url)
             logger.info(f"   🎯 DETECTED PAGE TYPE: {page_type}")
             
-            if page_type == "embedded_jobs":
+            if page_type == "individual_urls":
+                # Extract individual job URLs using improved logic
+                from .crawler import crawl_single_url
+                result = await crawl_single_url(career_page_url)
+                if not result['success']:
+                    return []
+                
+                html_content = result['html']
+                soup = BeautifulSoup(html_content, 'html.parser')
+                
+                # Use the improved job link patterns and logic
+                job_link_patterns = [
+                    r'/job/[^"]+', r'/career/[^"]+', r'/careers/[^"]+', r'/jobs/[^"]+', 
+                    r'/positions/[^"]+', r'/opportunities/[^"]+', r'/tuyen-dung/[^"]+',
+                    r'/recruitment/[^"]+', r'/vacancies/[^"]+', r'/openings/[^"]+',
+                    r'/apply/[^"]+', r'/employment/[^"]+', r'/hiring/[^"]+',
+                    r'/developer/[^"]+', r'/engineer/[^"]+', r'/manager/[^"]+',
+                    r'/analyst/[^"]+', r'/specialist/[^"]+', r'/consultant/[^"]+'
+                ]
+                
+                # Find all links that match job patterns
+                all_links = soup.find_all('a', href=True)
+                job_urls = []
+                
+                for link in all_links:
+                    href = link.get('href', '')
+                    if not href:
+                        continue
+                        
+                    # Convert relative URLs to absolute
+                    if href.startswith('/'):
+                        full_url = urljoin(career_page_url, href)
+                    elif href.startswith('http'):
+                        full_url = href
+                    else:
+                        continue
+                    
+                    # Check if it matches job patterns
+                    for pattern in job_link_patterns:
+                        if re.search(pattern, full_url, re.IGNORECASE):
+                            # Basic validation: not just career page root
+                            if not (full_url.rstrip('/').endswith('/career') or 
+                                   full_url.rstrip('/').endswith('/careers') or 
+                                   full_url.rstrip('/').endswith('/jobs')):
+                                job_urls.append(full_url)
+                                logger.info(f"   🔗 Found job URL: {full_url}")
+                                break
+                
+                # Remove duplicates and anchor links
+                clean_urls = []
+                seen_base_urls = set()
+                
+                for url in job_urls:
+                    # Remove anchor links (everything after #)
+                    base_url = url.split('#')[0]
+                    if base_url not in seen_base_urls:
+                        clean_urls.append(base_url)
+                        seen_base_urls.add(base_url)
+                
+                job_urls = clean_urls
+                logger.info(f"   🔗 Found {len(job_urls)} individual job URLs")
+                return job_urls
+                
+            elif page_type == "embedded_jobs":
                 # For embedded jobs, extract and cache them, return empty list for URLs
                 from .crawler import crawl_single_url
                 result = await crawl_single_url(career_page_url)
@@ -2785,8 +2888,18 @@ class JobExtractionService:
                                 logger.info(f"   🔗 Found job URL: {full_url}")
                                 break
                 
-                # Remove duplicates
-                job_urls = list(set(job_urls))
+                # Remove duplicates and anchor links
+                clean_urls = []
+                seen_base_urls = set()
+                
+                for url in job_urls:
+                    # Remove anchor links (everything after #)
+                    base_url = url.split('#')[0]
+                    if base_url not in seen_base_urls:
+                        clean_urls.append(base_url)
+                        seen_base_urls.add(base_url)
+                
+                job_urls = clean_urls
                 logger.info(f"   🔗 Found {len(job_urls)} individual job URLs")
                 return job_urls
             
@@ -2942,6 +3055,19 @@ class JobExtractionService:
                 return None
                 
             soup = BeautifulSoup(result['html'], 'html.parser')
+            
+            # First, check if this is already a job listing page by counting job links
+            job_links = soup.find_all('a', href=True)
+            job_url_count = 0
+            for link in job_links:
+                href = link.get('href', '')
+                if href and ('/careers/' in href or '/jobs/' in href or '/job/' in href):
+                    job_url_count += 1
+            
+            # If we already have many job links, this is likely the job listing page
+            if job_url_count >= 5:
+                logger.info(f"   🔍 Already at job listing page with {job_url_count} job links")
+                return None  # Don't redirect, we're already at the right page
             
             # Look for buttons/links that lead to job listings
             job_button_patterns = [
