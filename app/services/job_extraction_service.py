@@ -2366,7 +2366,7 @@ class JobExtractionService:
             
             # STEP 3: Quick scan for individual job URLs (simplified validation)
             job_link_patterns = [
-                r'/career/[^"]+', r'/careers/[^"]+', r'/jobs/[^"]+', 
+                r'/job/[^"]+', r'/career/[^"]+', r'/careers/[^"]+', r'/jobs/[^"]+', 
                 r'/positions/[^"]+', r'/opportunities/[^"]+', r'/tuyen-dung/[^"]+',
                 r'/recruitment/[^"]+', r'/vacancies/[^"]+', r'/openings/[^"]+',
                 r'/apply/[^"]+', r'/employment/[^"]+', r'/hiring/[^"]+',
@@ -2588,7 +2588,7 @@ class JobExtractionService:
                 
                 # Use the same patterns as detection
                 job_link_patterns = [
-                    r'/career/[^"]+', r'/careers/[^"]+', r'/jobs/[^"]+', 
+                    r'/job/[^"]+', r'/career/[^"]+', r'/careers/[^"]+', r'/jobs/[^"]+', 
                     r'/positions/[^"]+', r'/opportunities/[^"]+', r'/tuyen-dung/[^"]+',
                     r'/recruitment/[^"]+', r'/vacancies/[^"]+', r'/openings/[^"]+',
                     r'/apply/[^"]+', r'/employment/[^"]+', r'/hiring/[^"]+',
