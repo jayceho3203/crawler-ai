@@ -1,0 +1,14 @@
+{
+  "success": true,
+  "requested_url": "https://www.globant.com/",
+  "career_pages": [],
+  "total_pages_crawled": 0,
+  "career_pages_found": 0,
+  "crawl_time": 0.672697,
+  "crawl_method": "scrapy_optimized",
+  "contact_info": {
+    "emails": [],
+    "phones": [],
+    "contact_urls": []
+  }
+}

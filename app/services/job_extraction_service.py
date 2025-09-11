@@ -919,6 +919,10 @@ class JobExtractionService:
         try:
             logger.info(f"🔗 Extracting job URLs from: {career_page_url}")
             
+            # CLEAR CACHE FIRST to prevent data mixing between different companies
+            self.clear_all_cache()
+            logger.info("   🗑️ Cleared all cache to prevent data mixing")
+            
             # STEP 1: ANALYZE PAGE STRUCTURE FIRST
             logger.info("   🔍 Step 1: Analyze page structure and classify career page type")
             page_analysis = await self._analyze_career_page_structure(career_page_url)
@@ -996,7 +1000,7 @@ class JobExtractionService:
             logger.warning(f"   ⚠️ Error extracting direct job index: {e}")
             return None
 
-    def _format_job_response(self, job_data: Dict, job_url: str, success: bool = True, error_message: str = None) -> Dict:
+    def _format_job_response(self, job_data: Dict, job_url: str, success: bool = True, error_message: str = None, job_index: int = None) -> Dict:
         """Format job data to standard response"""
         # Check if job data is actually valid
         title = job_data.get('title', '').strip()
@@ -1015,14 +1019,28 @@ class JobExtractionService:
             error_message = 'Job data is empty or invalid'
             logger.warning(f"   ⚠️ Job data validation failed: title={bool(title)}, desc_len={len(description)}")
         
+        # Summarize long descriptions
+        summarized_description = self._summarize_description(description)
+
+        # Determine job_index to report back
+        try:
+            reported_index = (
+                job_index or
+                job_data.get('job_index') or
+                (int(job_url.split('#job-')[1]) if '#job-' in job_url else None) or
+                1
+            )
+        except Exception:
+            reported_index = 1
+
         response = {
             'success': success,
             'job_url': job_url,
-            'job_index': 1,  # Default job index
+            'job_index': reported_index,
             'job_name': job_data.get('title', ''),
             'job_type': job_data.get('job_type', 'Full-time'),
             'job_role': job_data.get('title', ''),
-            'job_description': job_data.get('description', ''),
+            'job_description': summarized_description,
             'location': job_data.get('location', ''),
             'salary': job_data.get('salary', ''),
             'job_link': job_url,
@@ -1034,22 +1052,50 @@ class JobExtractionService:
         logger.info(f"   📄 Final response: {response}")
         return response
 
-    def _empty_job_response(self, job_url: str, error_message: str = 'Job not found') -> Dict:
-        """Return empty job response"""
+    def _empty_job_response(self, job_url: str, error_message: str = 'Job not found', job_index: Optional[int] = None) -> Dict:
+        """Return empty job response with flat structure matching API"""
+        try:
+            inferred_index = (
+                job_index or
+                (int(job_url.split('#job-')[1]) if '#job-' in job_url else None) or
+                1
+            )
+        except Exception:
+            inferred_index = 1
+
         return {
             'success': False,
             'job_url': job_url,
-            'job_details': {
+            'job_index': inferred_index,
                         'job_name': '',
                         'job_type': 'Full-time',
                         'job_role': '',
                         'job_description': '',
-                        'job_link': job_url
-            },
+            'location': '',
+            'salary': '',
+            'job_link': job_url,
             'crawl_time': 0,
             'crawl_method': 'failed',
             'error_message': error_message
-            }
+        }
+
+    def _summarize_description(self, text: str, max_length: int = 300) -> str:
+        """Summarize long text to a concise snippet, preferring sentence boundaries."""
+        if not text:
+            return ''
+        text = re.sub(r"\s+", " ", text).strip()
+        if len(text) <= max_length:
+            return text
+        # Try to cut at the last period before the limit
+        cutoff = text[:max_length]
+        period_pos = cutoff.rfind('.')
+        if period_pos >= int(max_length * 0.6):
+            return cutoff[:period_pos + 1].strip() + ' ...'
+        # Otherwise cut at last space
+        space_pos = cutoff.rfind(' ')
+        if space_pos > 0:
+            return cutoff[:space_pos].strip() + ' ...'
+        return cutoff.strip() + ' ...'
     
     async def _validate_job_with_ai(self, job_data: Dict, job_url: str) -> bool:
         """
@@ -1176,10 +1222,7 @@ class JobExtractionService:
                 if len(title) > 5 and any(keyword in title.lower() for keyword in job_title_keywords):
                     logger.info(f"   🤖 ACCEPT - Job-like title without positive indicators: {title}")
                     return True
-                else:
-                    logger.info(f"   🤖 REJECT - No positive job indicators found")
-                    return False
-            elif positive_count >= 3:
+            if positive_count >= 3:
                 logger.info(f"   🤖 ACCEPT - Strong positive indicators ({positive_count})")
                 return True
             elif positive_count >= 1:
@@ -1281,6 +1324,11 @@ class JobExtractionService:
         
         try:
             logger.info(f"📄 Extracting job details from: {job_url}")
+            
+            # CLEAR CACHE FIRST to prevent data mixing between different companies
+            self.clear_all_cache()
+            logger.info("   🗑️ Cleared all cache to prevent data mixing")
+            
             # Infer index from URL fragment if present
             if job_index is None and '#job-' in job_url:
                 try:
@@ -1377,14 +1425,14 @@ class JobExtractionService:
                     logger.info(f"   📄 Title: '{job_data.get('title', '')}'")
                     logger.info(f"   📄 Description: '{job_data.get('description', '')[:100]}...'")
                     logger.info(f"   📄 About to call _format_job_response with job_data and career_url: {career_url}")
-                    result = self._format_job_response(job_data, career_url)
+                    result = self._format_job_response(job_data, career_url, job_index=job_index)
                     logger.info(f"   📄 _format_job_response result: {result}")
                     return result
                 else:
                     # Default gracefully to first job if index missing/invalid
                     logger.warning(f"   ⚠️ Invalid job index {job_index}, default to 1 (available: 1-{len(direct_jobs)})")
                     job_data = direct_jobs[0]
-                    return self._format_job_response(job_data, career_url)
+                    return self._format_job_response(job_data, career_url, job_index=1)
             
             # If no cache, extract directly from career page
             logger.info(f"   📄 No cache found, extracting directly from career page")
@@ -1402,7 +1450,7 @@ class JobExtractionService:
                 direct_jobs = getattr(self, '_direct_jobs_cache', [])
                 if direct_jobs:
                     logger.info(f"   📄 Using cached career page data")
-                    return self._format_job_response(direct_jobs[0], career_url)
+                    return self._format_job_response(direct_jobs[0], career_url, job_index=1)
             
             # Fallback: extract from career page
             logger.info(f"   📄 Extracting from career page directly")
@@ -1417,7 +1465,7 @@ class JobExtractionService:
                     'job_type': first_job.get('job_type', 'Full-time'),
                     'description': first_job.get('description', '')
                 }
-                return self._format_job_response(job_data, career_url)
+                return self._format_job_response(job_data, career_url, job_index=1)
             else:
                 return self._empty_job_response(career_url, 'No jobs found on career page')
             
@@ -2608,6 +2656,12 @@ class JobExtractionService:
             from urllib.parse import urljoin
             import re
             
+            # Try to find "All Open Positions" or similar button first
+            actual_job_page = await self._find_actual_job_listing_page(career_page_url)
+            if actual_job_page and actual_job_page != career_page_url:
+                logger.info(f"   🔍 Found actual job listing page: {actual_job_page}")
+                career_page_url = actual_job_page
+            
             # Detect career page type first
             page_type = await self._detect_career_page_type(career_page_url)
             logger.info(f"   🎯 DETECTED PAGE TYPE: {page_type}")
@@ -2664,6 +2718,17 @@ class JobExtractionService:
                         continue
                         
                     full_url = urljoin(career_page_url, href)
+                    
+                    # Skip non-job pages (benefits, culture, etc.)
+                    non_job_patterns = [
+                        '/benefits', '/culture', '/talent-community', '/work-culture',
+                        '/about', '/company', '/team', '/values', '/mission',
+                        '/contact', '/news', '/blog', '/press', '/media'
+                    ]
+                    
+                    if any(pattern in full_url.lower() for pattern in non_job_patterns):
+                        logger.info(f"   ⚠️ Skipping non-job page: {full_url}")
+                        continue
                     
                     # Check if URL matches job patterns (simplified validation)
                     for pattern in job_link_patterns:
@@ -2820,6 +2885,61 @@ class JobExtractionService:
         analysis['has_job_data'] = analysis['data_count'] > 0
         
         return analysis
+    
+    async def _find_actual_job_listing_page(self, career_page_url: str) -> Optional[str]:
+        """Find the actual job listing page by looking for 'All Open Positions' or similar buttons"""
+        try:
+            from .crawler import crawl_single_url
+            from bs4 import BeautifulSoup
+            from urllib.parse import urljoin
+            
+            result = await crawl_single_url(career_page_url)
+            if not result['success'] or not result['html']:
+                return None
+                
+            soup = BeautifulSoup(result['html'], 'html.parser')
+            
+            # Look for buttons/links that lead to job listings
+            job_button_patterns = [
+                'all open positions', 'view all jobs', 'see all jobs', 'browse jobs',
+                'current openings', 'job opportunities', 'career opportunities',
+                'tuyển dụng', 'việc làm', 'cơ hội nghề nghiệp'
+            ]
+            
+            # Check buttons and links
+            for element in soup.find_all(['a', 'button']):
+                text = (element.get_text() or '').strip().lower()
+                href = element.get('href', '')
+                
+                if any(pattern in text for pattern in job_button_patterns):
+                    if href:
+                        full_url = urljoin(career_page_url, href)
+                        logger.info(f"   🔍 Found job listing button: '{text}' -> {full_url}")
+                        return full_url
+                    else:
+                        # Button without href, might be JavaScript - try to find nearby links
+                        parent = element.parent
+                        if parent:
+                            for link in parent.find_all('a', href=True):
+                                full_url = urljoin(career_page_url, link['href'])
+                                if 'job' in full_url.lower() or 'career' in full_url.lower():
+                                    logger.info(f"   🔍 Found nearby job link: {full_url}")
+                                    return full_url
+            
+            # Check for common job listing URL patterns
+            for link in soup.find_all('a', href=True):
+                href = link['href']
+                if any(pattern in href.lower() for pattern in ['/jobs', '/careers', '/positions', '/opportunities']):
+                    full_url = urljoin(career_page_url, href)
+                    if full_url != career_page_url:  # Not the same page
+                        logger.info(f"   🔍 Found job listing URL pattern: {full_url}")
+                        return full_url
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"   ❌ Error finding job listing page: {e}")
+            return None
     
     # Removed legacy alternative methods in favor of deterministic flow in extract_job_urls_only
     
