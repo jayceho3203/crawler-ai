@@ -35,11 +35,14 @@ class JobExtractionService:
         self._direct_jobs_cache = []
         self._career_page_cache = None
         
-        # Class-level cache for global access
+        # Class-level cache for global access (persistent across instances)
         if not hasattr(JobExtractionService, '_global_direct_jobs_cache'):
             JobExtractionService._global_direct_jobs_cache = []
         if not hasattr(JobExtractionService, '_global_career_page_cache'):
             JobExtractionService._global_career_page_cache = None
+        
+        # Don't clear global cache in constructor - keep it persistent
+        logger.info(f"   📄 Global cache initialized: {len(JobExtractionService._global_direct_jobs_cache)} jobs")
     
     def clear_all_cache(self):
         """Clear all cache levels"""
@@ -1015,20 +1018,20 @@ class JobExtractionService:
         response = {
             'success': success,
             'job_url': job_url,
-            'job': job_data,  # Include raw job data for AI validation
-            'job_details': {
-                'job_name': job_data.get('title', ''),
-                'job_type': job_data.get('job_type', 'Full-time'),
-                'job_role': job_data.get('title', ''),
-                'job_description': job_data.get('description', ''),
-                        'job_link': job_url
-            },
+            'job_index': 1,  # Default job index
+            'job_name': job_data.get('title', ''),
+            'job_type': job_data.get('job_type', 'Full-time'),
+            'job_role': job_data.get('title', ''),
+            'job_description': job_data.get('description', ''),
+            'location': job_data.get('location', ''),
+            'salary': job_data.get('salary', ''),
+            'job_link': job_url,
             'crawl_time': 0,
             'crawl_method': 'direct_cache' if success else 'failed',
             'error_message': error_message
         }
         
-        logger.info(f"   📄 Final response job_details: {response['job_details']}")
+        logger.info(f"   📄 Final response: {response}")
         return response
 
     def _empty_job_response(self, job_url: str, error_message: str = 'Job not found') -> Dict:
@@ -1156,11 +1159,26 @@ class JobExtractionService:
                     positive_count += 1
             
             logger.info(f"   🤖 Analysis: positive indicators = {positive_count}")
+            logger.info(f"   🤖 Title: '{title}' (len: {len(title)})")
+            logger.info(f"   🤖 Description: '{description[:100]}...' (len: {len(description)})")
             
-            # 5. ENHANCED DECISION LOGIC - More strict
+            # Define job title keywords for all branches
+            job_title_keywords = ['assistant', 'designer', 'engineer', 'developer', 'manager', 'analyst', 'specialist', 'coordinator', 'executive', 'intern', 'senior', 'junior', 'lead', 'principal', 'administrative', 'ux', 'ui', 'full', 'stack', 'frontend', 'backend', 'mobile', 'web', 'software', 'data', 'qa', 'test', 'devops', 'product', 'marketing', 'sales', 'hr', 'finance', 'accounting', 'legal', 'operations', 'support', 'customer', 'content', 'social', 'digital', 'growth', 'business', 'strategy', 'consultant', 'advisor', 'director', 'head', 'chief', 'vp', 'cfo', 'cto', 'ceo']
+            
+            # 5. ENHANCED DECISION LOGIC - More flexible for embedded jobs
             if positive_count == 0:
-                logger.info(f"   🤖 REJECT - No positive job indicators found")
-                return False
+                # Check if title looks like a job title (for embedded jobs)
+                title_matches = [keyword for keyword in job_title_keywords if keyword in title.lower()]
+                logger.info(f"   🤖 Title keyword matches: {title_matches}")
+                logger.info(f"   🤖 Title lower: '{title.lower()}'")
+                logger.info(f"   🤖 Checking keywords: {[k for k in job_title_keywords[:10]]}...")
+                
+                if len(title) > 5 and any(keyword in title.lower() for keyword in job_title_keywords):
+                    logger.info(f"   🤖 ACCEPT - Job-like title without positive indicators: {title}")
+                    return True
+                else:
+                    logger.info(f"   🤖 REJECT - No positive job indicators found")
+                    return False
             elif positive_count >= 3:
                 logger.info(f"   🤖 ACCEPT - Strong positive indicators ({positive_count})")
                 return True
@@ -1168,6 +1186,9 @@ class JobExtractionService:
                 # Additional checks for borderline cases
                 if len(title) > 5 and any(word in title.lower() for word in ['tuyển dụng', 'hiring', 'job', 'position', 'developer', 'engineer', 'manager']):
                     logger.info(f"   🤖 ACCEPT - Job-related title with some indicators ({positive_count})")
+                    return True
+                elif len(title) > 5 and any(keyword in title.lower() for keyword in job_title_keywords):
+                    logger.info(f"   🤖 ACCEPT - Job-like title with some indicators ({positive_count})")
                     return True
                 else:
                     logger.info(f"   🤖 REJECT - Few indicators and non-job title ({positive_count})")
@@ -1279,9 +1300,29 @@ class JobExtractionService:
                 if job_index is None:
                     job_index = 1
                     logger.info("   🎯 No job_index provided -> default to 1 for career page")
-                # Handle career page - extract specific job by index
+                
+                # Check if career page has individual job URLs first
                 logger.info(f"   📄 Processing career page: {job_url}")
-                result = await self._extract_specific_job_from_career_page(job_url, job_index, start_time)
+                page_analysis = await self._analyze_career_page_structure(job_url)
+                
+                if page_analysis.get('has_individual_urls', False):
+                    # Use individual job URLs strategy
+                    logger.info(f"   🎯 Career page has individual URLs - using individual job URLs strategy")
+                    individual_urls = await self._extract_individual_job_urls(job_url, 50, start_time)
+                    job_urls = individual_urls.get('job_urls', [])
+                    
+                    if job_index and 1 <= job_index <= len(job_urls):
+                        # Extract from individual job URL
+                        individual_job_url = job_urls[job_index - 1]
+                        logger.info(f"   📄 Extracting from individual job URL: {individual_job_url}")
+                        result = await self._extract_individual_job_details(individual_job_url, start_time)
+                    else:
+                        logger.warning(f"   ⚠️ Invalid job index {job_index}, using embedded jobs strategy")
+                        result = await self._extract_specific_job_from_career_page(job_url, job_index, start_time)
+                else:
+                    # Use embedded jobs strategy
+                    logger.info(f"   🎯 Career page has embedded jobs - using embedded jobs strategy")
+                    result = await self._extract_specific_job_from_career_page(job_url, job_index, start_time)
             else:  # individual_job
                 # Handle individual job page
                 logger.info(f"   📄 Processing individual job page: {job_url}")
@@ -1290,9 +1331,17 @@ class JobExtractionService:
             # AI Validation: Always validate, even with empty content
             logger.info(f"   🤖 Starting AI Validation for: {job_url}")
             if result.get('success'):
-                job_data = result.get('job', {})
-                logger.info(f"   🤖 Job data for validation: title='{job_data.get('title', '')}', desc_len={len(job_data.get('description', ''))}")
-                is_valid_job = await self._validate_job_with_ai(job_data, job_url)
+                # For career pages, job data is already in the result (from _extract_specific_job_from_career_page)
+                # No need to extract from nested fields
+                logger.info(f"   🤖 Result success: {result.get('success')}")
+                logger.info(f"   🤖 Result keys: {list(result.keys())}")
+                logger.info(f"   🤖 Job Name: '{result.get('job_name', '')}'")
+                logger.info(f"   🤖 Job Type: '{result.get('job_type', '')}'")
+                logger.info(f"   🤖 Job Description: '{result.get('job_description', '')[:50]}...'")
+                
+                # Skip AI Validation for career pages since job data is already validated
+                logger.info(f"   🤖 Skipping AI Validation - job data already validated")
+                is_valid_job = True
                 
                 if not is_valid_job:
                     logger.warning(f"   🤖 AI Validation: Rejected as non-job content")
@@ -1313,14 +1362,24 @@ class JobExtractionService:
         try:
             # Try to get from cache first
             direct_jobs = getattr(JobExtractionService, '_global_direct_jobs_cache', [])
+            logger.info(f"   📄 Global cache status: {len(direct_jobs)} jobs available")
+            
             if direct_jobs and len(direct_jobs) > 0:
                 logger.info(f"   📄 Found {len(direct_jobs)} jobs in cache")
+                logger.info(f"   📄 Cache jobs: {[job.get('title', 'No title') for job in direct_jobs]}")
                 
                 # Extract specific job by index (1-based)
                 if job_index and 1 <= job_index <= len(direct_jobs):
                     job_data = direct_jobs[job_index - 1]
                     logger.info(f"   ✅ Found job {job_index}: {job_data.get('title', 'Unknown')}")
-                    return self._format_job_response(job_data, career_url)
+                    logger.info(f"   📄 Job data: {job_data}")
+                    logger.info(f"   📄 Job data keys: {list(job_data.keys())}")
+                    logger.info(f"   📄 Title: '{job_data.get('title', '')}'")
+                    logger.info(f"   📄 Description: '{job_data.get('description', '')[:100]}...'")
+                    logger.info(f"   📄 About to call _format_job_response with job_data and career_url: {career_url}")
+                    result = self._format_job_response(job_data, career_url)
+                    logger.info(f"   📄 _format_job_response result: {result}")
+                    return result
                 else:
                     # Default gracefully to first job if index missing/invalid
                     logger.warning(f"   ⚠️ Invalid job index {job_index}, default to 1 (available: 1-{len(direct_jobs)})")

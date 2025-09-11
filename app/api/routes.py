@@ -264,27 +264,18 @@ async def extract_job_details(request: JobDetailsRequest):
         if job_index:
             logger.info(f"   🎯 Job index: {job_index}")
         
+        # Ensure cache is set by extracting job URLs first
+        logger.info(f"   🔄 Setting cache for career page: {job_url}")
+        await job_extraction_service.extract_job_urls_only(job_url, 50)
+        
         # Extract job details
         result = await job_extraction_service.extract_job_details_only(
             job_url=job_url,
             job_index=job_index
         )
         
-        # Get job details with new field names
-        job_details = result.get('job_details', {})
-        
-        return {
-            'success': True,
-            'job_url': job_url,
-            'job_index': job_index,
-            'job_name': job_details.get('job_name', ''),
-            'job_type': job_details.get('job_type', 'Full-time'),
-            'job_role': job_details.get('job_role', ''),
-            'job_description': job_details.get('job_description', ''),
-            'job_link': job_details.get('job_link', job_url),
-            'crawl_time': result.get('crawl_time', 0),
-            'crawl_method': 'scrapy_optimized'
-        }
+        # Return result directly since _format_job_response now returns flat structure
+        return result
         
     except Exception as e:
         logger.error(f"Error in job details extraction endpoint: {e}")
