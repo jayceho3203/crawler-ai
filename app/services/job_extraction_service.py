@@ -1214,8 +1214,21 @@ class JobExtractionService:
             logger.info(f"   🤖 Title: '{title}' (len: {len(title)})")
             logger.info(f"   🤖 Description: '{description[:100]}...' (len: {len(description)})")
             
-            # Define job title keywords for all branches
-            job_title_keywords = ['assistant', 'designer', 'engineer', 'developer', 'manager', 'analyst', 'specialist', 'coordinator', 'executive', 'intern', 'senior', 'junior', 'lead', 'principal', 'administrative', 'ux', 'ui', 'full', 'stack', 'frontend', 'backend', 'mobile', 'web', 'software', 'data', 'qa', 'test', 'devops', 'product', 'marketing', 'sales', 'hr', 'finance', 'accounting', 'legal', 'operations', 'support', 'customer', 'content', 'social', 'digital', 'growth', 'business', 'strategy', 'consultant', 'advisor', 'director', 'head', 'chief', 'vp', 'cfo', 'cto', 'ceo']
+            # Define job title keywords for all branches (English + Vietnamese)
+            job_title_keywords = [
+                # English keywords
+                'assistant', 'designer', 'engineer', 'developer', 'manager', 'analyst', 'specialist', 'coordinator', 
+                'executive', 'intern', 'senior', 'junior', 'lead', 'principal', 'administrative', 'ux', 'ui', 
+                'full', 'stack', 'frontend', 'backend', 'mobile', 'web', 'software', 'data', 'qa', 'test', 
+                'devops', 'product', 'marketing', 'sales', 'hr', 'finance', 'accounting', 'legal', 'operations', 
+                'support', 'customer', 'content', 'social', 'digital', 'growth', 'business', 'strategy', 
+                'consultant', 'advisor', 'director', 'head', 'chief', 'vp', 'cfo', 'cto', 'ceo', 'management',
+                # Vietnamese keywords
+                'quản lý', 'nhân sự', 'hrm', 'thực tập sinh', 'intern', 'trainee', 'chuyên viên', 'nhân viên',
+                'kế toán', 'accountant', 'trưởng phòng', 'giám đốc', 'phó giám đốc', 'phân tích viên',
+                'trợ lý', 'assistant', 'quản lý dự án', 'project management', 'phát triển kinh doanh',
+                'business development', 'giải pháp', 'solution', 'triển khai', 'delivery'
+            ]
             
             # 5. ENHANCED DECISION LOGIC - More flexible for embedded jobs
             if positive_count == 0:
@@ -2030,6 +2043,82 @@ class JobExtractionService:
             logger.error(f"❌ Error extracting jobs from tables: {e}")
             return []
     
+    def _deduplicate_jobs_by_title(self, jobs: List[Dict]) -> List[Dict]:
+        """Deduplicate jobs by title similarity and filter out generic/noise titles"""
+        if not jobs:
+            return []
+        
+        # Filter out only generic single-word titles
+        filtered_jobs = []
+        generic_titles = ['engineer', 'developer', 'manager', 'analyst', 'assistant', 'specialist']
+        
+        for job in jobs:
+            title = job.get('title', '').lower().strip()
+            
+            # Skip if too generic (single word only)
+            if len(title.split()) <= 1 and title in generic_titles:
+                continue
+                
+            # Skip if title is too short
+            if len(title) < 5:
+                continue
+                
+            filtered_jobs.append(job)
+        
+        # Deduplicate by title similarity
+        unique_jobs = []
+        seen_titles = set()
+        
+        for job in filtered_jobs:
+            title = job.get('title', '').strip()
+            title_lower = title.lower()
+            
+            # Check for exact match
+            if title_lower in seen_titles:
+                continue
+                
+            # Check for similarity (fuzzy matching)
+            is_duplicate = False
+            for seen_title in seen_titles:
+                if self._are_titles_similar(title_lower, seen_title):
+                    is_duplicate = True
+                    break
+            
+            if not is_duplicate:
+                unique_jobs.append(job)
+                seen_titles.add(title_lower)
+        
+        return unique_jobs
+    
+    def _are_titles_similar(self, title1: str, title2: str) -> bool:
+        """Check if two job titles are similar (duplicates)"""
+        # Remove common words for comparison
+        common_words = ['the', 'a', 'an', 'and', 'or', 'of', 'in', 'at', 'to', 'for', 'with', 'by']
+        
+        words1 = set(title1.split()) - set(common_words)
+        words2 = set(title2.split()) - set(common_words)
+        
+        # If titles are exactly the same, they're similar
+        if title1 == title2:
+            return True
+        
+        # If one title is subset of another, they're similar ONLY if the difference is significant
+        if words1.issubset(words2) or words2.issubset(words1):
+            # Check if the difference is significant (more than just common words)
+            diff = words1.symmetric_difference(words2)
+            if len(diff) <= 1:  # Only 1 word difference
+                return True
+            # If difference is significant (like "Java Developer" vs "Java Developer (định hướng lead team)")
+            # Don't consider them similar
+            return False
+            
+        # If they share significant words, they're similar
+        intersection = words1.intersection(words2)
+        if len(intersection) >= 3:  # At least 3 common words (more strict)
+            return True
+            
+        return False
+
     def _extract_jobs_from_cards(self, soup, career_page_url: str) -> List[Dict]:
         """Extract jobs from card format using pattern-based approach"""
         jobs = []
@@ -2037,34 +2126,46 @@ class JobExtractionService:
             # Get all text content from the page
             page_text = soup.get_text()
             
-            # Define job patterns for different sites
-            job_patterns = {
-                'general': [
-                    # Main pattern for Quape and similar sites - captures job title with location and action
-                    r'([A-Z][a-zA-Z\s]+(?:Developer|Engineer|Manager|Analyst|Specialist|Assistant|Designer))[^.\n]*?(?:Singapore Only|Fully Remote|Remote)[^.\n]*?(?:See Details|See|Apply|View)',
-                    # Fallback patterns for other sites
-                    r'\[Remote-HN\]\s+([^-\n]+)',
-                    r'\[Remote\]\s+([^-\n]+)',
-                    r'Tuyển dụng.*?(\d{2}/\d{2}/\d{4}):\s*([^-\n]+)',
-                    r'(\d{2}/\d{2}/\d{4}):\s*([^-\n]+)',
-                    r'([A-Z][^-\n]*(?:Developer|Engineer|Manager|Analyst|Specialist|Marketing|Test|Freelancer|Assistant|Intern))'
-                ]
-            }
+            # Single comprehensive pattern for all job types
+            job_patterns = [
+                # Specific job titles (exact matches) - ORDER MATTERS!
+                r'(Thực tập sinh Business Analyst)',
+                r'(Technical Solution Manager)',
+                r'(Solution Delivery Engineer Intern)',
+                r'(Solution Delivery Engineer)(?!\s+Intern)',
+                r'(BiPlus Intern)',
+                r'(BD Manager)',
+                r'(Business Development Assistant)',
+                r'(Java Developer \(định hướng lead team\))',
+                r'(Java Developer)',
+                r'(Flutter Developer)',
+                r'(Quản lý nhân sự)',
+                r'(Thực tập sinh Hành chính nhân sự)',
+                r'(AM - Account Management)',
+                r'(BiPlus Internship Program \d{4})',
+                r'(BD Manager - Quản lý nhóm phát triển kinh doanh)',
+                r'(Project Management)',
+                r'(Nhân viên kế toán)',
+                r'(Trợ lý kinh doanh)',
+                # Generic patterns (fallback)
+                r'([A-Z][a-zA-Z\s]+(?:Developer|Engineer|Manager|Analyst|Specialist|Assistant|Designer))[^.\n]*?(?:Singapore Only|Fully Remote|Remote)[^.\n]*?(?:See Details|See|Apply|View)',
+                r'\[Remote-HN\]\s+([^-\n]+)',
+                r'\[Remote\]\s+([^-\n]+)',
+                r'Tuyển dụng.*?(\d{2}/\d{2}/\d{4}):\s*([^-\n]+)',
+                r'(\d{2}/\d{2}/\d{4}):\s*([^-\n]+)',
+                r'([A-Z][^-\n]*(?:Developer|Engineer|Manager|Analyst|Specialist|Marketing|Test|Freelancer|Assistant|Intern))',
+                r'(Chuyên viên|Nhân viên|Quản lý|Trưởng phòng|Giám đốc|Phó giám đốc)\s+[A-Za-zÀ-ỹ\s]+',
+                r'(Thực tập sinh|Intern|Trainee|Apprentice)\s+[A-Za-zÀ-ỹ\s]+'
+            ]
             
-            # Use main pattern first, then fallback to others if needed
-            main_pattern = job_patterns['general'][0]  # Main pattern for Quape
-            fallback_patterns = job_patterns['general'][1:]  # Fallback patterns
+            # Use single comprehensive pattern
+            jobs = self._extract_jobs_by_patterns(page_text, job_patterns, career_page_url, 'comprehensive')
             
-            # Try main pattern first
-            jobs = self._extract_jobs_by_patterns(page_text, [main_pattern], career_page_url, 'general')
+            # Deduplicate jobs by title similarity
+            deduplicated_jobs = self._deduplicate_jobs_by_title(jobs)
             
-            # If no jobs found with main pattern, try fallback patterns
-            if not jobs:
-                logger.info("   🔄 No jobs found with main pattern, trying fallback patterns")
-                jobs = self._extract_jobs_by_patterns(page_text, fallback_patterns, career_page_url, 'general')
-            
-            logger.info(f"   📦 Extracted {len(jobs)} jobs using pattern matching")
-            return jobs
+            logger.info(f"   📦 Extracted {len(deduplicated_jobs)} jobs using pattern matching (deduplicated from {len(jobs)})")
+            return deduplicated_jobs
             
         except Exception as e:
             logger.error(f"❌ Error extracting jobs from cards: {e}")
