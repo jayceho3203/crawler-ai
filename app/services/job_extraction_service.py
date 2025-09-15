@@ -1352,13 +1352,18 @@ class JobExtractionService:
         try:
             logger.info(f"📄 Extracting job details from: {job_url}")
             
-            # STEP 1: Always ensure cache is populated first
+            # STEP 1: Validate URL pattern first - reject non-job URLs
+            if not self._is_valid_job_url_pattern(job_url):
+                logger.warning(f"   🚫 Invalid job URL pattern: {job_url}")
+                return self._empty_job_response(job_url, 'Invalid job URL pattern - not a job detail page')
+            
+            # STEP 2: Always ensure cache is populated first
             if not getattr(JobExtractionService, '_global_direct_jobs_cache', []):
                 logger.info("   📄 Cache empty, populating from career page first")
                 await self.extract_job_urls_only(job_url)
                 logger.info("   ✅ Cache populated successfully")
             
-            # STEP 2: Clear cache only if it's from a different company
+            # STEP 3: Clear cache only if it's from a different company
             current_cache = getattr(JobExtractionService, '_global_direct_jobs_cache', [])
             if current_cache:
                 # Check if cache is from same domain
@@ -1573,6 +1578,39 @@ class JobExtractionService:
             return False
         return 1 <= job_index <= available_jobs
     
+    def _is_valid_job_url_pattern(self, url: str) -> bool:
+        """Check if URL is a valid job detail page pattern"""
+        url_lower = url.lower()
+        
+        # Must be a job detail page pattern
+        job_patterns = [
+            '/job/',           # Standard job pattern
+            '/jobs/',          # Alternative job pattern
+            '/position/',      # Position pattern
+            '/vacancy/',       # Vacancy pattern
+            '/opening/',       # Opening pattern
+            '/career/',        # Career pattern (but not /careers/)
+            '/tuyen-dung/',    # Vietnamese job pattern
+            '/viec-lam/',      # Vietnamese work pattern
+        ]
+        
+        # Check if URL contains job patterns
+        for pattern in job_patterns:
+            if pattern in url_lower:
+                # Additional validation: must not be a category page
+                if any(category in url_lower for category in [
+                    '/careers/our-culture',
+                    '/careers/benefits',
+                    '/careers/recruitment-process',
+                    '/careers/training-courses',
+                    '/careers/opening-positions',
+                    '/careers/career-your-benefits',
+                ]):
+                    return False
+                return True
+        
+        return False
+
     def _is_career_page_url(self, url: str) -> bool:
         """Check if URL is a career page (not a specific job page)"""
         url_lower = url.lower()
@@ -2920,7 +2958,11 @@ class JobExtractionService:
                 
                 job_urls = clean_urls
                 logger.info(f"   🔗 Found {len(job_urls)} individual job URLs")
-                return job_urls
+                
+                # Validate job URLs to filter out non-job pages
+                validated_urls = self._validate_job_urls(job_urls, career_page_url)
+                logger.info(f"   ✅ After validation: {len(validated_urls)} valid job URLs")
+                return validated_urls
                 
             elif page_type == "embedded_jobs":
                 # For embedded jobs, extract and cache them, return empty list for URLs
@@ -3028,6 +3070,11 @@ class JobExtractionService:
             for url in job_urls:
                 # Skip if it's the career page itself
                 if url == career_page_url:
+                    continue
+                
+                # Validate URL pattern - must be a job detail page
+                if not self._is_valid_job_url_pattern(url):
+                    logger.info(f"   🚫 Filtered out non-job URL: {url}")
                     continue
                 
                 # Skip AJAX load URLs

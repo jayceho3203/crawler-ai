@@ -163,7 +163,7 @@ def calculate_career_score(url: str, url_analysis: Dict) -> Tuple[int, Dict[str,
     score = 0
     score_breakdown = {}
     
-    # HIGH PRIORITY indicators (+5 points each)
+    # HIGH PRIORITY indicators (+5 points each) - but exclude non-career subpages
     high_priority_patterns = [
         '/tuyen-dung', '/tuyển-dụng', '/tuyendung',
         '/career', '/careers', '/job', '/jobs',
@@ -171,6 +171,15 @@ def calculate_career_score(url: str, url_analysis: Dict) -> Tuple[int, Dict[str,
     ]
     for pattern in high_priority_patterns:
         if pattern in path_lower:
+            # Check if it's a non-career subpage
+            non_career_subpages = [
+                '/careers/our-culture', '/careers/benefits', '/careers/recruitment-process',
+                '/careers/training-courses', '/careers/opening-positions', '/careers/career-your-benefits',
+                '/careers/team', '/careers/leadership', '/careers/company', '/careers/about',
+                '/careers/contact', '/careers/partnership', '/careers/investor'
+            ]
+            if any(subpage in path_lower for subpage in non_career_subpages):
+                continue  # Skip non-career subpages
             score += 5
             score_breakdown[f'high_priority_{pattern}'] = 5
             break  # Only count the first match
@@ -199,9 +208,18 @@ def calculate_career_score(url: str, url_analysis: Dict) -> Tuple[int, Dict[str,
                 score += 2
                 score_breakdown[f'career_keyword_{keyword}'] = 2
     
-    # EXACT CAREER PATTERNS (+4 points each)
+    # EXACT CAREER PATTERNS (+4 points each) - but exclude non-career subpages
     for pattern in CAREER_EXACT_PATTERNS:
         if pattern in path_lower:
+            # Check if it's a non-career subpage
+            non_career_subpages = [
+                '/careers/our-culture', '/careers/benefits', '/careers/recruitment-process',
+                '/careers/training-courses', '/careers/opening-positions', '/careers/career-your-benefits',
+                '/careers/team', '/careers/leadership', '/careers/company', '/careers/about',
+                '/careers/contact', '/careers/partnership', '/careers/investor'
+            ]
+            if any(subpage in path_lower for subpage in non_career_subpages):
+                continue  # Skip non-career subpages
             score += 4
             score_breakdown[f'exact_pattern_{pattern}'] = 4
             break
