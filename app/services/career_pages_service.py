@@ -316,6 +316,15 @@ class CareerPagesService:
             logger.warning(f"   ⚠️ Failed to parse sitemap: {e}")
             return []
 
+    def _is_homepage(self, url: str) -> bool:
+        """Check if URL is homepage"""
+        parsed = urlparse(url)
+        path = parsed.path.lower()
+        
+        # Check for homepage patterns
+        homepage_patterns = ['/', '', '/index.html', '/index.php', '/default.html', '/default.php']
+        return path in homepage_patterns and not parsed.query
+
     async def _analyze_url_for_career(self, url: str, base_url: str, strict_filtering: bool) -> Dict:
         """Analyze a single URL for career page indicators with improved scoring and validation"""
         analysis = {
@@ -336,6 +345,11 @@ class CareerPagesService:
             # Skip non-HTTP URLs
             if not url.startswith(('http://', 'https://')):
                 analysis['rejection_reason'] = 'Non-HTTP URL'
+                return analysis
+            
+            # EXCLUDE HOMEPAGE (HIGHEST PRIORITY)
+            if self._is_homepage(url):
+                analysis['rejection_reason'] = 'Homepage - not a career page'
                 return analysis
             
             # Parse URL
@@ -1170,9 +1184,22 @@ class CareerPagesService:
             scrapy_pages = scrapy_result.get('career_pages', [])
             requests_pages = requests_result.get('career_pages', [])
             
-            # Merge and deduplicate career pages
-            all_pages = scrapy_pages + requests_pages
-            unique_pages = list(set(all_pages))  # Remove duplicates
+            # 🎯 PRIORITIZE SCRAPY RESULTS: Only use requests results if Scrapy found nothing
+            if scrapy_pages:
+                # Scrapy found career pages, use only Scrapy results
+                unique_pages = scrapy_pages
+                logger.info(f"🔍 Using Scrapy results only: {len(scrapy_pages)} pages")
+            else:
+                # Scrapy found nothing, use requests results but filter out homepages
+                filtered_requests_pages = []
+                for page in requests_pages:
+                    if not self._is_homepage(page):
+                        filtered_requests_pages.append(page)
+                    else:
+                        logger.info(f"🚫 Filtered out homepage from requests: {page}")
+                
+                unique_pages = filtered_requests_pages
+                logger.info(f"🔍 Using filtered requests results: {len(filtered_requests_pages)} pages (filtered from {len(requests_pages)})")
             
             # Merge contact info
             scrapy_contact = scrapy_result.get('contact_info', {})

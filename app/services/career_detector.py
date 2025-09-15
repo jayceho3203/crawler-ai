@@ -287,11 +287,25 @@ def validate_career_page_content(url: str, html_content: str = None) -> Tuple[bo
     except Exception as e:
         return True, f"Validation error: {str(e)}"  # Skip validation on error
 
+def _is_homepage(url: str) -> bool:
+    """Check if URL is homepage"""
+    from urllib.parse import urlparse
+    parsed = urlparse(url)
+    path = parsed.path.lower()
+    
+    # Check for homepage patterns
+    homepage_patterns = ['/', '', '/index.html', '/index.php', '/default.html', '/default.php']
+    return path in homepage_patterns and not parsed.query
+
 def filter_career_urls(career_urls: List[str], html_contents: Dict[str, str] = None) -> List[Dict]:
     """Apply strict filtering to career URLs with detailed analysis"""
     filtered_results = []
     
     for url_found in career_urls:
+        # Step 0: EXCLUDE HOMEPAGE (HIGHEST PRIORITY)
+        if _is_homepage(url_found):
+            continue
+            
         # Step 1: URL Structure Analysis
         url_analysis = analyze_url_structure(url_found)
         
@@ -312,7 +326,7 @@ def filter_career_urls(career_urls: List[str], html_contents: Dict[str, str] = N
         acceptance_reason = ""
         
         # STRICT CRITERIA: Must meet multiple conditions
-        if career_score >= 6:  # High score requirement
+        if career_score >= 8:  # Higher score requirement to exclude homepage
             if content_valid or html_content is None:  # Content validation or no content to check
                 # Additional strict checks
                 path_lower = url_analysis['path']

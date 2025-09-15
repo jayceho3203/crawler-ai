@@ -578,6 +578,16 @@ class OptimizedCareerSpider(scrapy.Spider):
         
         return indicators
     
+    def _is_homepage(self, url: str) -> bool:
+        """Check if URL is homepage"""
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+        path = parsed.path.lower()
+        
+        # Check for homepage patterns
+        homepage_patterns = ['/', '', '/index.html', '/index.php', '/default.html', '/default.php']
+        return path in homepage_patterns and not parsed.query
+
     def is_career_listing_page(self, response) -> bool:
         """
         Phân biệt career listing page vs job detail page
@@ -591,6 +601,10 @@ class OptimizedCareerSpider(scrapy.Spider):
         parsed_url = urlparse(url)
         domain = parsed_url.netloc.lower()
         path = parsed_url.path.lower()
+        
+        # 0. EXCLUDE HOMEPAGE (HIGHEST PRIORITY)
+        if self._is_homepage(url):
+            return False
         
         # 1. Kiểm tra subdomain career (HIGHEST PRIORITY)
         if domain.startswith('career.') or domain.startswith('careers.') or domain.startswith('jobs.'):
@@ -620,6 +634,18 @@ class OptimizedCareerSpider(scrapy.Spider):
         # Nếu URL chứa career listing indicators -> là career listing page
         for indicator in career_listing_indicators:
             if indicator in url:
+                return True
+        
+        # 4. Career path patterns (NEW)
+        career_path_patterns = [
+            '/career', '/careers', '/jobs', '/positions', '/tuyen-dung',
+            '/recruitment', '/vacancies', '/openings', '/opportunities',
+            '/viec-lam', '/co-hoi', '/nhan-vien', '/ung-vien'
+        ]
+        
+        # Check if URL contains career path patterns
+        for pattern in career_path_patterns:
+            if pattern in path:
                 return True
         
         # 4. Kiểm tra content
