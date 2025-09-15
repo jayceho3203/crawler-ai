@@ -1201,6 +1201,44 @@ class CareerPagesService:
                 unique_pages = filtered_requests_pages
                 logger.info(f"🔍 Using filtered requests results: {len(filtered_requests_pages)} pages (filtered from {len(requests_pages)})")
             
+            # 🚫 REMOVE DUPLICATES: Ensure no duplicate URLs
+            seen_urls = set()
+            deduplicated_pages = []
+            for page in unique_pages:
+                if isinstance(page, dict):
+                    url = page.get('url', '')
+                else:
+                    url = str(page)
+                
+                if url and url not in seen_urls:
+                    seen_urls.add(url)
+                    deduplicated_pages.append(page)
+                else:
+                    logger.info(f"🚫 Removed duplicate: {url}")
+            
+            unique_pages = deduplicated_pages
+            logger.info(f"🔍 After deduplication: {len(unique_pages)} unique pages")
+            
+            # 🎯 LIMIT TO TOP 3 CAREER PAGES: Prioritize main career pages
+            if len(unique_pages) > 3:
+                # Sort by priority: main career pages first, then job listings
+                def career_page_priority(url):
+                    if '/tuyen-dung.html' in url and '/item/' not in url:
+                        return 1  # Main career page - highest priority
+                    elif '/tuyen-dung/' in url:
+                        return 2  # Job listings - medium priority
+                    elif '/careers' in url or '/jobs' in url:
+                        return 3  # English career pages - lower priority
+                    else:
+                        return 4  # Other pages - lowest priority
+                
+                # Sort by priority, then take top 3
+                sorted_pages = sorted(unique_pages, key=career_page_priority)
+                unique_pages = sorted_pages[:3]
+                logger.info(f"🎯 Limited to top 3 career pages: {unique_pages}")
+            else:
+                logger.info(f"🎯 Using all {len(unique_pages)} career pages (≤3)")
+            
             # Merge contact info
             scrapy_contact = scrapy_result.get('contact_info', {})
             requests_contact = requests_result.get('contact_info', {})
