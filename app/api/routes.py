@@ -173,6 +173,113 @@ async def detect_career_pages_scrapy_main(request: CareerPagesRequest):
         response_data['contact_info'] = contact_info
         response_data['has_contact_info'] = contact_info is not None
         
+        # Extract company description from main page
+        company_description = None
+        company_title = None
+        try:
+            from ..services.crawler import crawl_single_url
+            main_page_result = await crawl_single_url(request.url)
+            if main_page_result and main_page_result.get('success'):
+                company_description = main_page_result.get('description', '')
+                company_title = main_page_result.get('title', '')
+                logger.info(f"📝 Extracted company description: {company_description[:100]}...")
+                logger.info(f"🏢 Extracted company title: {company_title}")
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to extract company description: {e}")
+        
+        response_data['company_description'] = company_description
+        if company_title and not response_data.get('company_title'):
+            response_data['company_title'] = company_title
+        
+        # Add raw crawl data from main page
+        crawl_data = None
+        if main_page_result and main_page_result.get('success'):
+            # Extract raw HTML content
+            raw_html = main_page_result.get('html', '')
+            
+            # Extract text content from HTML
+            raw_text = ""
+            try:
+                from bs4 import BeautifulSoup
+                soup = BeautifulSoup(raw_html, 'html.parser')
+                raw_text = soup.get_text(separator=' ', strip=True)
+            except Exception as e:
+                logger.warning(f"⚠️ Error extracting text content: {e}")
+                raw_text = raw_html[:1000] + "..." if len(raw_html) > 1000 else raw_html
+            
+            # Extract metadata
+            metadata = {}
+            try:
+                from bs4 import BeautifulSoup
+                soup = BeautifulSoup(raw_html, 'html.parser')
+                
+                # Meta tags
+                meta_tags = {}
+                for meta in soup.find_all('meta'):
+                    name = meta.get('name') or meta.get('property') or meta.get('http-equiv')
+                    content = meta.get('content')
+                    if name and content:
+                        meta_tags[name] = content
+                
+                # Structured data (JSON-LD)
+                structured_data = []
+                for script in soup.find_all('script', type='application/ld+json'):
+                    try:
+                        import json
+                        data = json.loads(script.string)
+                        structured_data.append(data)
+                    except:
+                        pass
+                
+                # Open Graph tags
+                og_tags = {}
+                for meta in soup.find_all('meta', property=lambda x: x and x.startswith('og:')):
+                    og_tags[meta.get('property')] = meta.get('content')
+                
+                # Twitter Card tags
+                twitter_tags = {}
+                for meta in soup.find_all('meta', attrs={'name': lambda x: x and x.startswith('twitter:')}):
+                    twitter_tags[meta.get('name')] = meta.get('content')
+                
+                metadata = {
+                    'meta_tags': meta_tags,
+                    'structured_data': structured_data,
+                    'og_tags': og_tags,
+                    'twitter_tags': twitter_tags,
+                    'title_tag': soup.find('title').get_text() if soup.find('title') else '',
+                    'head_scripts': len(soup.find_all('script')),
+                    'head_styles': len(soup.find_all('style')),
+                    'images': len(soup.find_all('img')),
+                    'links': len(soup.find_all('a'))
+                }
+            except Exception as e:
+                logger.warning(f"⚠️ Error extracting metadata: {e}")
+                metadata = {'error': str(e)}
+            
+            crawl_data = {
+                # Raw data
+                'html_content': raw_html,
+                'text_content': raw_text,
+                'metadata': metadata,
+                'raw_response': {
+                    'status_code': main_page_result.get('status_code', 0),
+                    'final_url': main_page_result.get('url', ''),
+                    'crawl_time': main_page_result.get('crawl_time', 0),
+                    'crawl_method': main_page_result.get('crawl_method', ''),
+                    'content_length': len(raw_html),
+                    'text_length': len(raw_text)
+                },
+                # Processed data (for backward compatibility)
+                'title': main_page_result.get('title', ''),
+                'description': main_page_result.get('description', ''),
+                'emails': main_page_result.get('emails', []),
+                'phones': main_page_result.get('phones', []),
+                'urls': main_page_result.get('urls', [])
+            }
+            logger.info(f"📊 Added raw crawl data: {len(raw_html)} HTML chars, {len(raw_text)} text chars")
+        
+        response_data['crawl_data'] = crawl_data
+        
         # Merge Apify data with crawled contact info
         if contact_info and apify_data:
             # Add Apify phone if not already found

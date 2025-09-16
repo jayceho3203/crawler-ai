@@ -108,6 +108,10 @@ class CareerPagesResponse(BaseModel):
     has_contact_info: bool = False
     # Additional company info from Apify
     company_title: Optional[str] = None
+    # Company description
+    company_description: Optional[str] = None
+    # Raw crawl data
+    crawl_data: Optional[Dict] = None
 
 class BatchCareerPagesRequest(BaseModel):
     """Request model for batch career page detection"""

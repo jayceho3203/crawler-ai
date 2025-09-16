@@ -326,9 +326,67 @@ async def extract_with_requests(url: str) -> Dict:
             found_phones = re.findall(pattern, html_content)
             phones.extend(found_phones)
         
+        # Extract title and description
+        title = ""
+        description = ""
+        soup = BeautifulSoup(html_content, 'html.parser')
+        
+        try:
+            # Get title
+            title_tag = soup.find('title')
+            if title_tag:
+                title = title_tag.get_text().strip()
+            
+            # Get description - ưu tiên meta description
+            meta_desc = soup.find('meta', attrs={'name': 'description'})
+            if meta_desc:
+                description = meta_desc.get('content', '').strip()
+            
+            # Nếu không có meta description, tìm trong content
+            if not description or len(description) < 50:
+                # Tìm trong các thẻ có class chứa từ khóa mô tả
+                desc_selectors = [
+                    'p[class*="description"]', 'p[class*="about"]', 'p[class*="intro"]',
+                    'div[class*="description"]', 'div[class*="about"]', 'div[class*="intro"]',
+                    '.hero p', '.banner p', '.intro p', '.about p'
+                ]
+                
+                for selector in desc_selectors:
+                    desc_elem = soup.select_one(selector)
+                    if desc_elem:
+                        text = desc_elem.get_text().strip()
+                        if len(text) > len(description):
+                            description = text
+                
+                # Nếu vẫn chưa có, lấy đoạn văn đầu tiên dài nhất
+                if not description or len(description) < 50:
+                    paragraphs = soup.find_all('p')
+                    for p in paragraphs:
+                        text = p.get_text().strip()
+                        if len(text) > 100 and len(text) > len(description):
+                            description = text
+                    
+                    # Nếu vẫn chưa đủ dài, ghép nhiều đoạn văn lại
+                    if len(description) < 200:
+                        all_paragraphs = soup.find_all('p')
+                        combined_text = ""
+                        for p in all_paragraphs[:5]:  # Lấy 5 đoạn đầu
+                            text = p.get_text().strip()
+                            if len(text) > 50:  # Chỉ lấy đoạn có ý nghĩa
+                                if combined_text:
+                                    combined_text += " " + text
+                                else:
+                                    combined_text = text
+                                if len(combined_text) > 300:  # Đủ dài rồi thì dừng
+                                    break
+                        
+                        if len(combined_text) > len(description):
+                            description = combined_text
+        except Exception as e:
+            logger.warning(f"⚠️ Error extracting title/description: {e}")
+
         # Extract all URLs (tối ưu - chỉ lấy 50 URLs đầu để giảm memory)
         urls = []
-        soup = BeautifulSoup(html_content, 'html.parser')
         for a_tag in soup.find_all('a', href=True)[:50]:  # Reduced to 50 for memory
             href = a_tag.get('href')
             if href:
@@ -350,6 +408,8 @@ async def extract_with_requests(url: str) -> Dict:
             "status_code": response.status if response else 200,
             "url": str(response.url) if response else url,
             "html": html_content,
+            "title": title,
+            "description": description,
             "emails": valid_emails,
             "phones": list(set(phones)),
             "urls": list(set(urls)),
