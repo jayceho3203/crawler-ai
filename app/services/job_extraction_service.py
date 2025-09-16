@@ -880,12 +880,18 @@ class JobExtractionService:
                 self._direct_jobs_cache = normalized
                 JobExtractionService._global_direct_jobs_cache = normalized
                 crawl_time = (time.time() - start_time)
+                
+                # Create synthetic job URLs for N8N compatibility
+                synthetic_job_urls = []
+                for i in range(len(normalized)):
+                    synthetic_job_urls.append(f"{career_page_url}?job_index={i+1}")
+                
                 response = {
                     'success': True,
                     'career_page_url': career_page_url,
                     'total_jobs_found': len(normalized),
-                    'has_individual_urls': False,
-                    'job_urls': [],
+                    'has_individual_urls': True,  # Changed to True for N8N compatibility
+                    'job_urls': synthetic_job_urls,  # Added synthetic URLs
                     'job_indices': list(range(1, len(normalized) + 1)),
                     'crawl_time': crawl_time,
                     'crawl_method': 'scrapy_optimized',
@@ -1352,18 +1358,29 @@ class JobExtractionService:
         try:
             logger.info(f"📄 Extracting job details from: {job_url}")
             
-            # STEP 1: Validate URL pattern first - reject non-job URLs
-            if not self._is_valid_job_url_pattern(job_url):
+            # STEP 1: Check if this is a synthetic URL for embedded jobs
+            synthetic_job_index = None
+            if '?job_index=' in job_url:
+                try:
+                    synthetic_job_index = int(job_url.split('?job_index=')[1])
+                    logger.info(f"   🎯 Detected synthetic URL with job_index: {synthetic_job_index}")
+                    # Use the synthetic job_index instead of the parameter
+                    job_index = synthetic_job_index
+                except (ValueError, IndexError):
+                    pass
+            
+            # STEP 2: Validate URL pattern (skip for synthetic URLs)
+            if not synthetic_job_index and not self._is_valid_job_url_pattern(job_url):
                 logger.warning(f"   🚫 Invalid job URL pattern: {job_url}")
                 return self._empty_job_response(job_url, 'Invalid job URL pattern - not a job detail page')
             
-            # STEP 2: Always ensure cache is populated first
+            # STEP 3: Always ensure cache is populated first
             if not getattr(JobExtractionService, '_global_direct_jobs_cache', []):
                 logger.info("   📄 Cache empty, populating from career page first")
                 await self.extract_job_urls_only(job_url)
                 logger.info("   ✅ Cache populated successfully")
             
-            # STEP 3: Clear cache only if it's from a different company
+            # STEP 4: Clear cache only if it's from a different company
             current_cache = getattr(JobExtractionService, '_global_direct_jobs_cache', [])
             if current_cache:
                 # Check if cache is from same domain
@@ -1378,6 +1395,13 @@ class JobExtractionService:
             else:
                 logger.info("   🗑️ No cache found, will populate during extraction")
             
+            # Handle synthetic URLs for embedded jobs
+            actual_job_url = job_url
+            if synthetic_job_index:
+                # Extract the actual career page URL from synthetic URL
+                actual_job_url = job_url.split('?job_index=')[0]
+                logger.info(f"   🎯 Synthetic URL detected, using career page: {actual_job_url}")
+            
             # Infer index from URL fragment if present
             if job_index is None and '#job-' in job_url:
                 try:
@@ -1388,8 +1412,8 @@ class JobExtractionService:
             if job_index:
                 logger.info(f"   🎯 Job index: {job_index}")
             
-            # Detect job URL type
-            url_type = self._detect_job_url_type(job_url)
+            # Detect job URL type (use actual URL for synthetic URLs)
+            url_type = self._detect_job_url_type(actual_job_url)
             logger.info(f"   🔍 Detected URL type: {url_type}")
             
             if url_type == 'career_page':
@@ -1399,13 +1423,13 @@ class JobExtractionService:
                     logger.info("   🎯 No job_index provided -> default to 1 for career page")
                 
                 # Check if career page has individual job URLs first
-                logger.info(f"   📄 Processing career page: {job_url}")
-                page_analysis = await self._analyze_career_page_structure(job_url)
+                logger.info(f"   📄 Processing career page: {actual_job_url}")
+                page_analysis = await self._analyze_career_page_structure(actual_job_url)
                 
                 if page_analysis.get('has_individual_urls', False):
                     # Use individual job URLs strategy
                     logger.info(f"   🎯 Career page has individual URLs - using individual job URLs strategy")
-                    individual_urls = await self._extract_individual_job_urls(job_url, 50, start_time)
+                    individual_urls = await self._extract_individual_job_urls(actual_job_url, 50, start_time)
                     job_urls = individual_urls.get('job_urls', [])
                     
                     if job_index and 1 <= job_index <= len(job_urls):
@@ -1415,11 +1439,11 @@ class JobExtractionService:
                         result = await self._extract_individual_job_details(individual_job_url, start_time)
                     else:
                         logger.warning(f"   ⚠️ Invalid job index {job_index}, using embedded jobs strategy")
-                        result = await self._extract_specific_job_from_career_page(job_url, job_index, start_time)
+                        result = await self._extract_specific_job_from_career_page(actual_job_url, job_index, start_time)
                 else:
                     # Use embedded jobs strategy
                     logger.info(f"   🎯 Career page has embedded jobs - using embedded jobs strategy")
-                    result = await self._extract_specific_job_from_career_page(job_url, job_index, start_time)
+                    result = await self._extract_specific_job_from_career_page(actual_job_url, job_index, start_time)
             else:  # individual_job
                 # Handle individual job page
                 logger.info(f"   📄 Processing individual job page: {job_url}")
@@ -1525,7 +1549,7 @@ class JobExtractionService:
             # Fallback: extract from career page
             logger.info(f"   📄 Extracting from career page directly")
             result = await self._extract_jobs_from_single_page(
-           career_url, max_jobs=1, include_hidden_jobs=True, include_job_details=True
+                career_url, max_jobs=1, include_hidden_jobs=True, include_job_details=True
             )
             
             if result['success'] and result.get('jobs'):
@@ -1610,7 +1634,7 @@ class JobExtractionService:
                 return True
         
         return False
-
+    
     def _is_career_page_url(self, url: str) -> bool:
         """Check if URL is a career page (not a specific job page)"""
         url_lower = url.lower()
